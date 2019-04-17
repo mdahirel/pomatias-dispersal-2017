@@ -1,6 +1,6 @@
 
 ## TO DO: metadata to add (here or separate file)
-##clean data import
+##check consistiency of data import
 
 
 ########################################
