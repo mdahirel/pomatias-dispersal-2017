@@ -20,7 +20,7 @@ library(tidyr)
 library(cowplot)
 
 ## Load raw dataset
-data <- read.table("D:/Maxime/Documents/ATER 2016-2018/RECHERCHE/projet_pomatias/pomatias-dispersal-2017/dataset_pomatias.txt",
+data <- read.table("./dataset_pomatias.txt",
   header = TRUE
 )
 
