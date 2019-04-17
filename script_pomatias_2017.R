@@ -1,3 +1,19 @@
+
+## TO DO: metadata to add (here or separate file)
+## plot styling (color, line type for predictions,
+## jitter observed box-level values (but generated with ave()_ how to do it?))
+## check tidy functions instead of ave
+##clean data import
+
+
+########################################
+## Data analysis script for:
+## Increased population density depresses activity but does not influence dispersal in the snail Pomatias elegans
+## Maxime Dahirel, Loic Menut, Armelle Ansart
+## script author: Maxime Dahirel
+########################################
+
+## Load necessary packages
 library(lme4)
 library(car)
 library(arm)
@@ -6,126 +22,130 @@ library(tidyverse)
 library(tidyr)
 library(cowplot)
 
-data <- read.table("D:/Maxime/Documents/ATER 2016-2018/RECHERCHE/projet_pomatias/dataset_pomatias.txt",
-                   header=TRUE)
+## Load raw dataset
+data <- read.table("D:/Maxime/Documents/ATER 2016-2018/RECHERCHE/projet_pomatias/pomatias-dispersal-2017/dataset_pomatias.txt",
+  header = TRUE
+)
 
-data$BOX <- factor(interaction(data$Date,data$Box_code))
-data$Disp2 <- -0.5 + as.numeric(data$Disp == "yes")
-data$is.female <- -0.5 + as.numeric(data$Sex_true == "F")
+########################################
+## PART 0: Variable creation and experimental design checks
+########################################
+
+## creation of new variables
+data$BOX <- factor(interaction(data$Date, data$Box_code))
+data$Disp2 <- -0.5 + as.numeric(data$Disp == "yes") ## centered dummy variable
+data$is.female <- -0.5 + as.numeric(data$Sex_true == "F") ## centered dummy variable
 data$scale_Density <- scale(data$Density)
-data$scale_Density2 <-(data$scale_Density)^2
 
-### test that pretrial sex evaluation was not biased with respect to density
-Nmales <- by(data$Sex_true == "M", data$BOX, FUN = sum)
-Density <- by(data$Density, data$BOX, FUN = mean)
-Day <- by(data$Day, data$BOX, FUN = unique)
-Week <- by(data$Week, data$BOX, FUN = unique)
-plot(Density, Nmales / Density)
-plot(factor(Density), Nmales / Density)
-boxdata <- data.frame(Density = c(Density), Nmales = c(Nmales), Day = c(Day),Week=c(Week))
-boxdata$scale_Density <- scale(boxdata$Density)
-
-
-mod1 <- glmer(cbind(Nmales,Density-Nmales) ~ scale_Density+(1|Day),
-  data = boxdata, family = binomial
-)
-
-Anova(mod1)
-
-mod1factor <- glmer(cbind(Nmales,Density-Nmales) ~ factor(Density)+(1|Day),
-  data = boxdata, family = binomial
-)
-###gives a singular warning because no Day variance, removing the random effect of Day leads to same conclusions
-Anova(mod1factor)
+### data check: test that pretrial sex evaluation was not biased with respect to density
+#### create box-level variables and create a box-level dataset
+# Nmales <- by(data$Sex_true == "M", data$BOX, FUN = sum)
+# Density <- by(data$Density, data$BOX, FUN = mean)
+# Day <- by(data$Day, data$BOX, FUN = unique)
+# boxdata <- data.frame(Density = c(Density), Nmales = c(Nmales), Day = c(Day),Week=c(Week))
+# boxdata$scale_Density <- scale(boxdata$Density)
+#
+#### model with density as a continuous variable
+# mod_dens <- glmer(cbind(Nmales,Density-Nmales) ~ scale_Density+(1|Day),
+#  data = boxdata, family = binomial
+# )
+# Anova(mod_dens)
+#
+#### model with density as a factor
+# mod_dens_factor <- glmer(cbind(Nmales,Density-Nmales) ~ factor(Density)+(1|Day),
+#  data = boxdata, family = binomial
+# )
+#### note: gives a singular warning apparently because of virtually 0 among-Day variance
+#### removing the random effect of Day (doing a GLM instead of a GLMM) leads to same conclusions
+# Anova(mod_dens_factor)
 
 
-## Dispersal model v1
-mod2 <- glmer(Disp ~ (scale_Density) * is.female + (1|Date/BOX),
+########################################
+## PART 1: Data analysis
+########################################
+
+## Dispersal model
+mod_disp <- glmer(Disp ~ (scale_Density) * is.female + (1 | Date / BOX),
   data = data, family = binomial
 )
+Anova(mod_disp) # ; Anova(mod_disp,type="3")#virtually identical results thanks to centring/scaling
 
-Anova(mod2)#; Anova(mod2,type="3")#virtually identical results
-
-### activity model v1
-mod3 <- glmer(Active ~ (scale_Density) * (Disp2 * is.female) + (1|Date/BOX),
+### Activity model
+mod_activ <- glmer(Active ~ (scale_Density) * (Disp2 * is.female) + (1 | Date / BOX),
   data = data, family = binomial
 )
-
-Anova(mod3)#; Anova(mod3,type="3")#virtually identical results
-
-### do plots
-### WRITE :)
+Anova(mod_activ) # ; Anova(mod_activ,type="3")#virtually identical results
 
 
+########################################
+## PART 2: Generating figures
+########################################
 
-
-
-
-
-###plots
-
-###dispersal
-newdata <- expand.grid(   ##for predictions
-  Density = c(10:300)/10,
+#### make a newdata to house predictions every 0.1 snail with everything except density averaged out
+newdata <- expand.grid(
+  Density = c(10:300) / 10,
   Disp2 = 0,
   is.female = 0,
-  Date=data$Date[1],
-  BOX=data$BOX[1]
+  Date = data$Date[1], ### needed for predict() to work but not used (predictions on fixed effects only)
+  BOX = data$BOX[1] ### same
 )
-newdata$scale_Density=(newdata$Density-mean(data$Density))/sd(data$Density)
+newdata$scale_Density <- (newdata$Density - mean(data$Density)) / sd(data$Density) ## scale based on the *original* dataset SD
 
-PREDS=invlogit(predictInterval(mod2,newdata=newdata,which="fixed",level=0.95, n.sims=10000,stat="mean",type="linear.prediction",include.resid.var = FALSE))
-names(PREDS)=c("fit_disp","lcl_disp","ucl_disp")
-newdata=cbind(newdata,PREDS)
 
-test <- data[,c("Disp","Density")] %>% 
-  group_by(Density) %>% 
-  summarize(mean_disp=mean(Disp=="yes"))
+### Dispersal as a function of density
+### add the predictions and their 95% confidence interval
+### include.resid.var set so we have confidence intervals and not prediction intervals
+PREDS_disp <- invlogit(
+  predictInterval(mod_disp,
+    newdata = newdata, which = "fixed",
+    level = 0.95, n.sims = 10000, stat = "mean",
+    type = "linear.prediction", include.resid.var = FALSE
+  )
+)
+names(PREDS_disp) <- c("fit_disp", "ucl_disp", "lcl_disp")
+newdata <- cbind(newdata, PREDS_disp)
 
-data$meandisp=ave(data$Disp=="yes",data$BOX,FUN=mean)
-plot_disp<-ggplot(data=test)+
-  geom_point(data=test,aes(x = Density, y = mean_disp),size=2)+
-  geom_point(data=data,aes(x = Density, y = meandisp),col="grey")+
-  geom_line(data=newdata,aes(x=Density,y=fit_disp))+
-  geom_line(data=newdata,aes(x=Density,y=lcl_disp))+
-  geom_line(data=newdata,aes(x=Density,y=ucl_disp))+
+data$meandisp_box <- ave(data$Disp == "yes", data$BOX, FUN = mean)
+data$meandisp_dens <- ave(data$Disp == "yes", data$Density, FUN = mean)
+###### ^ this way to calculate grand means only works because all averaged boxes have the same densities!
+
+plot_disp <- ggplot() +
+  geom_point(data = data, aes(x = Density, y = meandisp_box), col = "grey", size = 3) +
+  geom_point(data = data, aes(x = Density, y = meandisp_dens), size = 2) +
+  geom_line(data = newdata, aes(x = Density, y = fit_disp)) +
+  geom_line(data = newdata, aes(x = Density, y = lcl_disp)) +
+  geom_line(data = newdata, aes(x = Density, y = ucl_disp)) +
   scale_y_continuous(name = "Dispersal rate", limits = c(0, 1)) +
-  scale_x_continuous(name = "Population density (snails per box)", limits = c(0, 30)) +
+  scale_x_continuous(name = "", limits = c(0, 30)) + ## no axis name because present on activity subplot
   theme_classic()
 
 
-###activity
-newdata <- expand.grid(   ##for predictions
-  Density = c(10:300)/10,
-  Disp2 = 0,
-  is.female = 0,
-  Date=data$Date[1],
-  BOX=data$BOX[1]
+### Activity as a function of density
+
+PREDS_active <- invlogit(
+  predictInterval(mod_activ,
+    newdata = newdata, which = "fixed",
+    level = 0.95, n.sims = 10000, stat = "mean",
+    type = "linear.prediction", include.resid.var = FALSE
+  )
 )
-newdata$scale_Density=(newdata$Density-mean(data$Density))/sd(data$Density)
+names(PREDS_active) <- c("fit_activity", "ucl_activity", "lcl_activity")
+newdata <- cbind(newdata, PREDS_active)
 
-PREDS=invlogit(predictInterval(mod3,newdata=newdata,which="fixed",level=0.95, n.sims=10000,stat="mean",type="linear.prediction",include.resid.var = FALSE))
-names(PREDS)=c("fit_activity","lcl_activity","ucl_activity")
-newdata=cbind(newdata,PREDS)
+data$meanactive_box <- ave(data$Active, data$BOX, FUN = mean)
+data$meanactive_dens <- ave(data$Active, data$Density, FUN = mean)
 
-test <- data[,c("Active","Density")] %>% 
-  group_by(Density) %>% 
-  summarize(mean_active=mean(Active))
 
-data$meanactive=ave(data$Active,data$BOX,FUN=mean)
-
-plot_activity<-ggplot(data=test)+
-  geom_point(aes(x = Density, y = mean_active),size=2)+
-  geom_point(data=data,aes(x = Density, y = meanactive),col="grey")+
-  geom_line(data=newdata,aes(x=Density,y=fit_activity))+
-  geom_line(data=newdata,aes(x=Density,y=lcl_activity))+
-    geom_line(data=newdata,aes(x=Density,y=ucl_activity))+
+plot_activity <- ggplot() +
+  geom_point(data = data, aes(x = Density, y = meanactive_box), col = "grey", size = 3) +
+  geom_point(data = data, aes(x = Density, y = meanactive_dens), size = 2) +
+  geom_line(data = newdata, aes(x = Density, y = fit_activity)) +
+  geom_line(data = newdata, aes(x = Density, y = lcl_activity)) +
+  geom_line(data = newdata, aes(x = Density, y = ucl_activity)) +
   scale_y_continuous(name = "Activity probability", limits = c(0, 1)) +
   scale_x_continuous(name = "Population density (snails per box)", limits = c(0, 30)) +
   theme_classic()
-  
 
 
-plot_grid(plot_disp, plot_activity, labels = c("A", "B"), nrow = 2) ##review legend position to be sure plot 1 and 2 are aligned
-
-
+### join the two subplots in a common figures using cowplot
+plot_grid(plot_disp, plot_activity, labels = c("A", "B"), nrow = 2)
