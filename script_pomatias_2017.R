@@ -7,10 +7,10 @@ library(tidyr)
 library(cowplot)
 
 data <- read.table("D:/Maxime/Documents/ATER 2016-2018/RECHERCHE/projet_pomatias/dataset_pomatias.txt",
-                   header=TRUE, dec=",")
+                   header=TRUE)
 
 data$BOX <- factor(interaction(data$Date,data$Box_code))
-data$Disp2 <- -0.5 + as.numeric(data$Disp == "oui")
+data$Disp2 <- -0.5 + as.numeric(data$Disp == "yes")
 data$is.female <- -0.5 + as.numeric(data$Sex_true == "F")
 data$scale_Density <- scale(data$Density)
 data$scale_Density2 <-(data$scale_Density)^2
@@ -80,9 +80,9 @@ newdata=cbind(newdata,PREDS)
 
 test <- data[,c("Disp","Density")] %>% 
   group_by(Density) %>% 
-  summarize(mean_disp=mean(Disp=="oui"))
+  summarize(mean_disp=mean(Disp=="yes"))
 
-data$meandisp=ave(data$Disp=="oui",data$BOX,FUN=mean)
+data$meandisp=ave(data$Disp=="yes",data$BOX,FUN=mean)
 plot_disp<-ggplot(data=test)+
   geom_point(data=test,aes(x = Density, y = mean_disp),size=2)+
   geom_point(data=data,aes(x = Density, y = meandisp),col="grey")+
