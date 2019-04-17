@@ -1,8 +1,5 @@
 
 ## TO DO: metadata to add (here or separate file)
-## plot styling (color, line type for predictions,
-## jitter observed box-level values (but generated with ave()_ how to do it?))
-## check tidy functions instead of ave
 ##clean data import
 
 
@@ -105,16 +102,12 @@ PREDS_disp <- invlogit(
 names(PREDS_disp) <- c("fit_disp", "ucl_disp", "lcl_disp")
 newdata <- cbind(newdata, PREDS_disp)
 
-data$meandisp_box <- ave(data$Disp == "yes", data$BOX, FUN = mean)
-data$meandisp_dens <- ave(data$Disp == "yes", data$Density, FUN = mean)
-###### ^ this way to calculate grand means only works because all averaged boxes have the same densities!
-
 plot_disp <- ggplot() +
-  geom_point(data = data, aes(x = Density, y = meandisp_box), col = "grey", size = 3) +
-  geom_point(data = data, aes(x = Density, y = meandisp_dens), size = 2) +
+  stat_summary(data = data, aes(x = Density, y = as.numeric(Disp=="yes"),group=BOX),fun.y = "mean",geom="point", col = "grey", size = 2)+
+  stat_summary(data = data, aes(x = Density, y = as.numeric(Disp=="yes")),fun.y = "mean",geom="point", size = 3)+
   geom_line(data = newdata, aes(x = Density, y = fit_disp)) +
-  geom_line(data = newdata, aes(x = Density, y = lcl_disp)) +
-  geom_line(data = newdata, aes(x = Density, y = ucl_disp)) +
+  geom_line(data = newdata, aes(x = Density, y = lcl_disp),lty=2) +
+  geom_line(data = newdata, aes(x = Density, y = ucl_disp),lty=2) +
   scale_y_continuous(name = "Dispersal rate", limits = c(0, 1)) +
   scale_x_continuous(name = "", limits = c(0, 30)) + ## no axis name because present on activity subplot
   theme_classic()
@@ -132,16 +125,12 @@ PREDS_active <- invlogit(
 names(PREDS_active) <- c("fit_activity", "ucl_activity", "lcl_activity")
 newdata <- cbind(newdata, PREDS_active)
 
-data$meanactive_box <- ave(data$Active, data$BOX, FUN = mean)
-data$meanactive_dens <- ave(data$Active, data$Density, FUN = mean)
-
-
 plot_activity <- ggplot() +
-  geom_point(data = data, aes(x = Density, y = meanactive_box), col = "grey", size = 3) +
-  geom_point(data = data, aes(x = Density, y = meanactive_dens), size = 2) +
+  stat_summary(data = data, aes(x = Density, y = Active,group=BOX),fun.y = "mean",geom="point", col = "grey", size = 2)+
+  stat_summary(data = data, aes(x = Density, y = Active),fun.y = "mean",geom="point", size = 3)+
   geom_line(data = newdata, aes(x = Density, y = fit_activity)) +
-  geom_line(data = newdata, aes(x = Density, y = lcl_activity)) +
-  geom_line(data = newdata, aes(x = Density, y = ucl_activity)) +
+  geom_line(data = newdata, aes(x = Density, y = lcl_activity),lty=2) +
+  geom_line(data = newdata, aes(x = Density, y = ucl_activity),lty=2) +
   scale_y_continuous(name = "Activity probability", limits = c(0, 1)) +
   scale_x_continuous(name = "Population density (snails per box)", limits = c(0, 30)) +
   theme_classic()
