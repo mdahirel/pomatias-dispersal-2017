@@ -24,6 +24,11 @@ data <- read.table("./dataset_pomatias.txt",
   header = TRUE
 )
 
+data_discrimin <- read.table("./discrimin_pomatias.txt",
+                   header = TRUE
+)
+
+
 ########################################
 ## PART 0: Variable creation and experimental design checks
 ########################################
