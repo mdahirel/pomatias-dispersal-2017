@@ -24,6 +24,10 @@ data <- read.table("./dataset_pomatias.txt",
   header = TRUE
 )
 
+morpho <- read.table("./dataset_morpho_pomatias.txt",
+                   header = TRUE
+)
+
 data_discrimin <- read.table("./discrimin_pomatias.txt",
                    header = TRUE
 )
@@ -39,6 +43,10 @@ data$Disp2 <- -0.5 + as.numeric(data$Disp == "yes") ## centered dummy variable
 data$is.female <- -0.5 + as.numeric(data$Sex_true == "F") ## centered dummy variable
 data$scale_Density <- scale(data$Density)
 
+data$uniqueID <- as.numeric(str_split_fixed(data$ID,"_",3)[,2])
+
+
+data <- left_join(data,morpho)
 ### data check: test that pretrial sex evaluation was not biased with respect to density
 #### create box-level variables and create a box-level dataset
 # Nmales <- by(data$Sex_true == "M", data$BOX, FUN = sum)
