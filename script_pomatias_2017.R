@@ -19,6 +19,15 @@ library(tidyverse)
 library(tidyr)
 library(cowplot)
 
+library(matrixStats)
+library(coda)
+library(rstan)
+library(tidybayes)
+library(brms)
+rstan_options(auto_write = TRUE)
+options(mc.cores = 2)
+
+
 ## Load raw dataset
 data <- read.table("./dataset_pomatias.txt",
   header = TRUE
@@ -47,6 +56,10 @@ data$uniqueID <- as.numeric(str_split_fixed(data$ID,"_",3)[,2])
 
 
 data <- left_join(data,morpho)
+
+data<-data %>% gather(key="ShellMeasure",value="Shell_Mass",c("Shell_Mass1","Shell_Mass2"))
+
+
 ### data check: test that pretrial sex evaluation was not biased with respect to density
 #### create box-level variables and create a box-level dataset
 # Nmales <- by(data$Sex_true == "M", data$BOX, FUN = sum)
