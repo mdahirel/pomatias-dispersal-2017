@@ -1,14 +1,37 @@
-## TO DO: metadata to add (here or separate file)
-##check consistiency of data import
+---
+title: "script for the analysis of Pomatias"
+author: "Maxime Dahirel"
+date: "13/02/2020"
+output: html_document
+---
 
-########################################
-## Data analysis script for:
-## Increased population density depresses activity but does not influence dispersal in the snail Pomatias elegans
-## Maxime Dahirel, Loic Menut, Armelle Ansart
-## script author: Maxime Dahirel
-########################################
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
 
-## Load necessary packages
+The present R Markdown file contains the analysis script for the manuscript entitled "Increased population density depresses activity but does not influence dispersal in the snail Pomatias elegans" (authors: Maxime Dahirel, Loic Menut, and Armelle Ansart), along with narrative comments to help the reader. 
+
+(A "classical" R script version is also available in the same folder, for readers who'd rather use that. That version is much less commented, but both run the same analyses)
+
+
+# Introduction
+
+The aims of this study were to:
+
+- determine whetehr dispersal and activity are density-dependent in Pomatias elegans
+- determine whether these two traits were linked
+-determine whether there was a link between behaviour and morphological defence, using (relative) shell weight as a proxy for the latter
+
+To do so, we exposed snails to different densities and examined their dispersal and activity responses (binary traits); we then weighted their shells. We analysed these data using a multivariate mixed model approach.
+
+(see manuscript for details)
+
+
+# Raw data description and wrangling
+
+First, let's load the packages we'll need:
+
+```{r load-packages}
 library(arm)
 library(matrixStats)
 library(tidyverse)
@@ -18,24 +41,23 @@ library(brms)
 library(patchwork)
 rstan_options(auto_write = TRUE)
 options(mc.cores = 2)
+```
 
+Now we load the three raw data files:
+```{r load-raw-datafiles}
 ## Load raw dataset
-data <- read.table("./dataset_pomatias.txt",
-                   header = TRUE
-)
+data <- read.table("./dataset_pomatias.txt", header = TRUE)
+morpho <- read.table("./dataset_morpho_pomatias.txt", header = TRUE)
+data_discrimin <- read.table("./discrimin_pomatias.txt", header = TRUE)
+```
 
-morpho <- read.table("./dataset_morpho_pomatias.txt",
-                     header = TRUE
-)
+METADATA TO ADD HERE
 
-data_discrimin <- read.table("./discrimin_pomatias.txt",
-                             header = TRUE
-)
+For our analysis, we're going to need to (a) combine the "data" and "morpho" datasets, (b) create a bunch a new variables from the original ones, and (c) convert the dataset into a "long" format where both shell mass measures are in the same column, as well as both behavioural measures (the latter is not strictly needed, but it makes fitting a "latent" behavioural variable way easier).
 
-########################################
-## PART 0: Variable creation and experimental design checks
-########################################
+So let's do that:
 
+```{r data-wrangling1}
 ## creation of new variables
 data<-as_tibble(data) %>% 
   mutate(BOX = factor(interaction(Date, Box_code)),
@@ -69,44 +91,26 @@ data2<-data %>%
 
 data<-left_join(data1,data2) %>% 
   mutate(which_behaviour=fct_recode(which_behaviour,Active="behave_Active",Disp="behave_Disp"))
+```
 
-##########END OF DATA MANIPULATION SCRIPT
-##########START OF DATA ANALYSIS SCRIPT
-
+```{r data-wrangling2}
 data %<>% 
   mutate(scale_shell=scale(Shell_Mass),
        scale_height=scale(Height),
        scale_logshellmass=scale(log(Shell_Mass)),
-       scale_logheight=scale(log(Height))) %>% 
-  mutate(scale_logshellmass_NAfilled=replace_na(scale_logshellmass,0), ###needed for the subset() approach
-       is.shell.valid=as.numeric(is.na(Shell_Mass)==FALSE))  ### the is.shell.valid variable ensures the filled NAs are ignored during fitting
+       scale_logheight=scale(log(Height))) #%>% 
+  #mutate(scale_logshellmass_NAfilled=replace_na(scale_logshellmass,0), ###needed for the subset() approach
+  #     is.shell.valid=as.numeric(is.na(Shell_Mass)==FALSE))  ### the is.shell.valid variable ensures the filled NAs are ignored during fitting for the subset() approach
+```
 
-###note, check how scaled vars are entered in tibbles
+... and *Voilà*! We have our final dataset! But what's in it, you may ask? Let's look:
 
-####models for supplementary
+# Final data table description
 
-mod_S1a <- data %>% filter(mass_measurement=="Shell_Mass1") %>% 
-  group_by(BOX) %>% 
-  summarise(Density=mean(Density),Nfemales=sum(Sex_dissection=="F")) %>% 
-  ungroup() %>% 
-  brm(Nfemales|trials(Density)~1,family=binomial,
-      prior=c(set_prior("normal(0,1.5)",class="Intercept")),data=., seed = 42
-  )
 
-mod_S1b <- data %>% filter(mass_measurement=="Shell_Mass1") %>% 
-  group_by(BOX) %>% 
-  summarise(Density=mean(Density),Nfemales=sum(Sex_dissection=="F")) %>% 
-  ungroup() %>% 
-  brm(Nfemales|trials(Density)~0+factor(Density),family=binomial,
-      prior=c(set_prior("normal(0,1.5)",class="b")),data=., seed = 42
-  )
+# Main model
 
-mod_S3 <- brm(behave~scale_Density+scale_logheight+is.female+Disp2+(1|BOX),family=bernoulli,
-             prior=c(set_prior("normal(0,1.5)",class="Intercept"),
-                     set_prior("normal(0,1)",class="b"),
-                     set_prior("normal(0,1)",class="sd")),data=subset(data,which_behaviour=="Active"), seed = 42
-)
-
+```{r main-model}
 ####main model
 prior=c(
   set_prior("normal(0,1)",class="Intercept",resp=c("scalelogshellmass")),
@@ -130,8 +134,16 @@ bf_shell_miss<-bf(scale_logshellmass|mi() ~ scale_logheight + is.female+(1|q|ID)
 mod=brm(mvbf(bf_behave+bf_shell_miss),data=data,prior=prior,iter=250, warmup=50,
         control=list(adapt_delta=0.95,max_treedepth=15),chains=4,seed=42) 
 
+```
 
 
+```{r some-posterior-checking}
+```
+
+
+# Plotting
+
+```{r fig1}
 newdata=data %>%
   select(which_behaviour) %>% 
   distinct() %>%
@@ -162,8 +174,9 @@ p2<-newdata %>%
 
 (p1/p2)+plot_annotation(tag_levels="A")
 
+```
 
-
+```{r fig2}
 
 newdata<-data %>% select(which_behaviour,behave,ID) %>% distinct()
 newdata<-as_tibble(ranef(mod,summary = FALSE)$ID[,,"behave_Intercept"]) %>% 
@@ -213,7 +226,9 @@ p5 <- newdata %>%
   theme_bw()
 
 p5+p4
+```
 
+```{r fig3}
 newdata<-data %>% select(which_behaviour,behave,ID) %>% distinct()
 newdata<-as_tibble(ranef(mod,summary = FALSE)$ID[,,"scalelogshellmass_Intercept"]) %>% 
   mutate(
@@ -253,5 +268,33 @@ p7 <- newdata %>%
   theme_bw()
 
 (p7+p6)
+```
 
+# Supplementary Materials
 
+```{r supplementary-models}
+
+####models for supplementary
+
+mod_S1a <- data %>% filter(mass_measurement=="Shell_Mass1") %>% 
+  group_by(BOX) %>% 
+  summarise(Density=mean(Density),Nfemales=sum(Sex_dissection=="F")) %>% 
+  ungroup() %>% 
+  brm(Nfemales|trials(Density)~1,family=binomial,
+      prior=c(set_prior("normal(0,1.5)",class="Intercept")),data=., seed = 42
+  )
+
+mod_S1b <- data %>% filter(mass_measurement=="Shell_Mass1") %>% 
+  group_by(BOX) %>% 
+  summarise(Density=mean(Density),Nfemales=sum(Sex_dissection=="F")) %>% 
+  ungroup() %>% 
+  brm(Nfemales|trials(Density)~0+factor(Density),family=binomial,
+      prior=c(set_prior("normal(0,1.5)",class="b")),data=., seed = 42
+  )
+
+mod_S3 <- brm(behave~scale_Density+scale_logheight+is.female+Disp2+(1|BOX),family=bernoulli,
+             prior=c(set_prior("normal(0,1.5)",class="Intercept"),
+                     set_prior("normal(0,1)",class="b"),
+                     set_prior("normal(0,1)",class="sd")),data=subset(data,which_behaviour=="Active"), seed = 42
+)
+```
