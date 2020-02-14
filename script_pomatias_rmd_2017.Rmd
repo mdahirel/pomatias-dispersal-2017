@@ -3,31 +3,39 @@ title: "script for the analysis of Pomatias"
 author: "Maxime Dahirel"
 date: "13/02/2020"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
 ```
 
-The present R Markdown file contains the analysis script for the manuscript entitled "Increased population density depresses activity but does not influence dispersal in the snail Pomatias elegans" (authors: Maxime Dahirel, Loic Menut, and Armelle Ansart), along with narrative comments to help the reader. 
+The present R Markdown file contains the analysis script for the manuscript entitled 
+
+"Increased population density depresses activity but does not influence dispersal in the snail *Pomatias elegans*" 
+
+(authors: Maxime Dahirel, Loic Menut, and Armelle Ansart)
+
+, along with narrative comments to help the reader. 
 
 (A "classical" R script version is also available in the same folder, for readers who'd rather use that. That version is much less commented, but both run the same analyses)
 
 
-# Introduction
+## Introduction
 
 The aims of this study were to:
 
-- determine whetehr dispersal and activity are density-dependent in Pomatias elegans
+- determine whetehr dispersal and activity are density-dependent in *Pomatias elegans*
 - determine whether these two traits were linked
--determine whether there was a link between behaviour and morphological defence, using (relative) shell weight as a proxy for the latter
+- determine whether there was a link between behaviour and morphological defence, using (relative) shell weight as a proxy for the latter
 
 To do so, we exposed snails to different densities and examined their dispersal and activity responses (binary traits); we then weighted their shells. We analysed these data using a multivariate mixed model approach.
 
 (see manuscript for details)
 
 
-# Raw data description and wrangling
+## Raw data description and wrangling
 
 First, let's load the packages we'll need:
 
@@ -43,258 +51,354 @@ rstan_options(auto_write = TRUE)
 options(mc.cores = 2)
 ```
 
-Now we load the three raw data files:
+Now we load the raw data files:
 ```{r load-raw-datafiles}
 ## Load raw dataset
-data <- read.table("./dataset_pomatias.txt", header = TRUE)
-morpho <- read.table("./dataset_morpho_pomatias.txt", header = TRUE)
-data_discrimin <- read.table("./discrimin_pomatias.txt", header = TRUE)
+data0 <- read.table("./dataset_main_pomatias.txt", header = TRUE)
+shell_morpho <- read.table("./dataset_shellmass_pomatias.txt", header = TRUE)
+# data_discrimin <- read.table("./discrimin_pomatias.txt", header = TRUE)
 ```
 
-METADATA TO ADD HERE
+The "data0" dataset contains the following columns:
 
-For our analysis, we're going to need to (a) combine the "data" and "morpho" datasets, (b) create a bunch a new variables from the original ones, and (c) convert the dataset into a "long" format where both shell mass measures are in the same column, as well as both behavioural measures (the latter is not strictly needed, but it makes fitting a "latent" behavioural variable way easier).
+- *ID* : unique individual ID
+- *Date* : (format dd/mm/yy) day the dispersal test was started
+- *Box_code*: numeric code of test box during dispersal. Box_codes are only unique within test dates; you need to combine it with *Date* to get a unique code for each box (this wil be done below)
+- *Density*: number of individuals in the same box during the dispersal test
+- *Sex_true*: (M = male, F = female) sex determined by dissection after the tests, using presence of male genitalia = male as a criterion
+- *Sex_predicted*: sex inferred from a Linear Discriminant Analysis using shell morphometrics; used for assigning snails to boxes in an approximately sex-balanced fashion
+- *Disp* : (binary no/yes) whether or not the snail dispersed (crossed to the second half of the two-patch system) after 4 days of test
+- *Time_sec* : (in seconds) time to activity during the activity test. Values >= 1200 are censored, that is, they denote the time at which we stopped observing, NOT the time at which they become active 
+- *Active* : (binary 0/1) whether or not the snail got active during 
+- *Height*, *Diametre*, *PeristomeH* : Shell height, width and aperture height for each shell (in mm) 
+
+The "shell_morpho" dataset adds shell information not present in the main dataset and contains 4 columns: 
+
+- *uniqueID* : a number uniquely identifying each individual (note that this number is contained in the *ID* string of "data0" after the first "_"; this will be used to merge them)
+- *Shell_Mass1* and *Shell_Mass2*:  successive measures of shell mass for each snail (in mg)
+- *area* : (unused, in cm²) shell area when photographed as in Fig. 1 of the article
+
+For our analysis, we're going to need to (a) combine the "data0" and "morpho" datasets, (b) create a bunch of new variables from the original ones, and (c) convert the dataset into a "long" format where both shell mass measures are in the same column, as well as both behavioural measures (the latter is not strictly needed, but it makes fitting a "latent" behavioural variable way easier).
 
 So let's do that:
 
 ```{r data-wrangling1}
 ## creation of new variables
-data<-as_tibble(data) %>% 
-  mutate(BOX = factor(interaction(Date, Box_code)),
-         Disp2 = -0.5 + as.numeric(Disp == "yes"), ## centered dummy variable ##for supplementary material only
-         is.female = -0.5 + as.numeric(Sex_true == "F"), ## centered dummy variable
-         scale_Density = scale(Density),
-         uniqueID = as.numeric(str_split_fixed(ID,"_",3)[,2])
-  ) %>% 
-  left_join(morpho) %>% 
-  mutate(behave_Disp=as.numeric(Disp=="yes"),behave_Active=Active) %>% 
-  dplyr::select(Date,BOX,uniqueID,ID,
-         Density,scale_Density,
-         Sex_predicted,Sex_dissection=Sex_true,is.female,###rename Sex variable to something more "accurate"
-         Height,Shell_width=Diametre,ApertureH=PeristomeH,  ###rename Diametre and PeristomeH variables to something more accurate
-         Shell_Mass1,Shell_Mass2,
-         Disp2,behave_Active,behave_Disp,Time_sec)
+data <- as_tibble(data0) %>%
+  mutate(
+    BOX = factor(interaction(Date, Box_code)),
+    Disp2 = -0.5 + as.numeric(Disp == "yes"), ## centered dummy variable ##for supplementary material only
+    is.female = -0.5 + as.numeric(Sex_true == "F"), ## centered dummy variable
+    scale_Density = scale(Density),
+    uniqueID = as.numeric(str_split_fixed(ID, "_", 3)[, 2])
+  ) %>%
+  left_join(shell_morpho) %>%
+  mutate(behave_Disp = as.numeric(Disp == "yes"), behave_Active = Active) %>%
+  select(Date, BOX, uniqueID, ID,
+    Density, scale_Density,
+    Sex_predicted,
+    Sex_dissection = Sex_true, is.female, ### rename Sex variable to something more "accurate"
+    Shell_height = Height, Shell_width = Diametre, Aperture_height = PeristomeH, ### renamed morpho variables to something more accurate
+    Shell_Mass1, Shell_Mass2,
+    Disp2, behave_Active, behave_Disp, Time_sec
+  )
 
-data1<-data %>% 
-   dplyr::select(-c(behave_Active, behave_Disp)) %>% 
-  pivot_longer(names_to="mass_measurement",
-               values_to="Shell_Mass",
-               cols=contains("Shell_Mass")) %>% 
-  mutate(measurement_order=as.numeric(mass_measurement=="Shell_Mass2")+1)
-data2<-data %>% 
-   dplyr::select(-c(Shell_Mass1,Shell_Mass2)) %>% 
-   pivot_longer(names_to="which_behaviour",
-                values_to="behave",
-                cols=contains("behave")) %>% 
-  mutate(measurement_order=as.numeric(which_behaviour=="behave_Active")+1)
+data1 <- data %>%
+  select(-c(behave_Active, behave_Disp)) %>%
+  pivot_longer(
+    names_prefix = "Shell_Mass",
+    names_to = "measurement_order",
+    values_to = "Shell_mass",
+    cols = contains("Shell_Mass")
+  ) %>%
+  mutate(measurement_order = as.numeric(measurement_order))
+
+data2 <- data %>%
+  select(-c(Shell_Mass1, Shell_Mass2)) %>%
+  pivot_longer(
+    names_to = "which_behaviour",
+    values_to = "behave",
+    cols = contains("behave")
+  ) %>%
+  mutate(measurement_order = as.numeric(which_behaviour == "behave_Active") + 1)
 
 
-data<-left_join(data1,data2) %>% 
-  mutate(which_behaviour=fct_recode(which_behaviour,Active="behave_Active",Disp="behave_Disp"))
+data <- left_join(data1, data2) %>%
+  mutate(which_behaviour = fct_recode(which_behaviour, Active = "behave_Active", Disp = "behave_Disp"))
 ```
 
 ```{r data-wrangling2}
-data %<>% 
-  mutate(scale_shell=scale(Shell_Mass),
-       scale_height=scale(Height),
-       scale_logshellmass=scale(log(Shell_Mass)),
-       scale_logheight=scale(log(Height))) #%>% 
-  #mutate(scale_logshellmass_NAfilled=replace_na(scale_logshellmass,0), ###needed for the subset() approach
-  #     is.shell.valid=as.numeric(is.na(Shell_Mass)==FALSE))  ### the is.shell.valid variable ensures the filled NAs are ignored during fitting for the subset() approach
+data <- data %>%
+  mutate(
+    scale_logshellmass = scale(log(Shell_mass)),
+    scale_logheight = scale(log(Shell_height))
+  ) # %>%
+# mutate(scale_logshellmass_NAfilled=replace_na(scale_logshellmass,0), ###needed for the subset() approach
+#     is.shell.valid=as.numeric(is.na(Shell_Mass)==FALSE))  ### the is.shell.valid variable ensures the filled NAs are ignored during fitting for the subset() approach
 ```
 
 ... and *Voilà*! We have our final dataset! But what's in it, you may ask? Let's look:
 
-# Final data table description
+- *Date*, *uniqueID*, *ID*, *Density*, *Sex_predicted* and *Time_sec* are the same as above 
+-  *Sex_dissection*, *Shell_width*, *Shell_height* and *Aperture_height* are renamed versions of *Sex_true*,  *Diametre*, *Height*, *PeristomeH* for accuracy (they are otherwise unchanged) 
+- *scale_Density* : *Density*, centred and scaled to unit 1SD
+- *BOX* : a unique identifier for each tested group of snails
+- *is.female* : a dummy centred numerical variable (-0.5 for *Sex_dissection* = Male, +0.5 for Female)
+- *Disp2*: a dummy centred numerical variable (-0.5 for *Disp* = "no", +0.5 for "yes")
+- *Shell_mass* : *Shell_Mass1* and *Shell_Mass2*, converted to long format
+- *measurement order*: 1 or 2, is the first measure of *Shell_Mass* or behaviour or the second? (for Behaviour, Dispersal always comes first, then Activity)
+- *behave* : (binary 0/1) did the individual showed the behaviour denoted in *which_behaviour* during the corresponding test?
+- *scale_logshellmass* : *Shell_mass*, ln-transformed and then centred+scaled to unit 1SD
+- *scale_logheight* : *Shell_height*, ln-transformed and then centred+scaled to unit 1SD
 
+## Main model
 
-# Main model
+Now, let's fit our main model (see description in the methods and supplementary material of the paper).
+Note how it is a trivariate model (Dispersal, Activity, Shell Mass) but only two submodels are fitted. That's on purpose, we grouped Dispersal and Activity in the same variable and submodel to make it easier to write the shared random effect of individual ID (which corresponds to a latent behavioural variable).
+
+It should need 10000-20000 iterations per chain post-warmup to reach satisfactory effective sample sizes for everything (depends on your threshold). Runtime on a laptop with 2 cores used in parallel and 12 Gb memory: about 8-10h.
 
 ```{r main-model}
-####main model
-prior=c(
-  set_prior("normal(0,1)",class="Intercept",resp=c("scalelogshellmass")),
-  set_prior("normal(0,1)",class="b",resp=c("behave","scalelogshellmass")),
-  set_prior("normal(0,1.5)",class="b",resp="behave",coef=c("which_behaviourActive","which_behaviourDisp")),
-  set_prior("normal(0,1)",class="sd",resp=c("behave","scalelogshellmass")),
-  set_prior("normal(0,1)",class="sigma",resp="scalelogshellmass"), #to relax?? hist(exp(rexp(1000,10)*0.19))
-  set_prior("lkj(2)",class="cor")
+####first, our priors
+prior <- c(
+  set_prior("normal(0,1)", class = "Intercept", resp = c("scalelogshellmass")),
+  set_prior("normal(0,1)", class = "b", resp = c("behave", "scalelogshellmass")),
+  set_prior("normal(0,1.5)", class = "b", resp = "behave", coef = c("which_behaviourActive", "which_behaviourDisp")),
+  set_prior("normal(0,1)", class = "sd", resp = c("behave", "scalelogshellmass")),
+  set_prior("normal(0,1)", class = "sigma", resp = "scalelogshellmass"),
+  set_prior("lkj(2)", class = "cor")
 )
 
-bf_behave<-bf(behave~0+which_behaviour+which_behaviour:(scale_Density+scale_logheight+is.female)+
-                (0+which_behaviour|BOX)+(1|q|ID),family=bernoulli)
+#### then, our submodels
 
-bf_shell_miss<-bf(scale_logshellmass|mi() ~ scale_logheight + is.female+(1|q|ID))
+bf_behave <- bf(behave ~ 0 + which_behaviour + which_behaviour:(scale_Density + scale_logheight + is.female) +
+  (0 + which_behaviour | BOX) + (1 | q | ID), family = bernoulli)
 
-##an alternative would be to use the subset approach, essentially ignoring the NA values, but only for the response with NA
+bf_shell_miss <- bf(scale_logshellmass | mi() ~ scale_logheight + is.female + (1 | q | ID))
+
+## an alternative to missing data imputation with mi() would be to use the subset() approach, essentially ignoring the NA values, but only for the response with NA
 ## that is, no deletion of entire rows
-### leads to sensibly the same results in our case
-#bf_shell_subset<-bf(scale_logshellmass_NAfilled|subset(is.shell.valid) ~ scale_logheight + is.female+(1|q|ID))
+### leads to sensibly the same results in our case (as expected when missing data are only in responses)
+# bf_shell_subset<-bf(scale_logshellmass_NAfilled|subset(is.shell.valid) ~ scale_logheight + is.female+(1|q|ID))
 
-mod=brm(mvbf(bf_behave+bf_shell_miss),data=data,prior=prior,iter=250, warmup=50,
-        control=list(adapt_delta=0.95,max_treedepth=15),chains=4,seed=42) 
+mod <- brm(mvbf(bf_behave + bf_shell_miss),
+  data = data, prior = prior, iter = 100, warmup = 50,
+  control = list(adapt_delta = 0.95, max_treedepth = 15), chains = 4, seed = 42
+)
 
 ```
 
+Now, some post-fitting checks:
 
 ```{r some-posterior-checking}
+summary(mod) ## everything looks good
+
+## but summary.brmsfit gives mean and 95% quantile interval
+## I would like median and HDI instead
+
+mod %>%
+  posterior_samples() %>%
+  select(starts_with(c("Intercept", "b_", "sd_", "cor_"))) %>%
+  pivot_longer(everything()) %>%
+  group_by(name) %>%
+  median_hdi()
+
+plot(mod)
+pp_check(mod, resp = "behave") ## not really informative given it's a binary variable
+pp_check(mod, resp = "scalelogshellmass", newdata = data %>% filter(is.na(scale_logshellmass) == FALSE))
+### need to make the pp_check on a dataset without the NAs or fail
+### this one is not really informative either; we have a random effect of ID so it's a given it should look good
+### unless we spectacularly failed with the residual variation
+### but still good to check
+### see ?pp_check for other possibilities
 ```
 
 
-# Plotting
+## Plotting
+
+For the first figure, we want to look at how dispersal and activity probability are predicted to change with density, and plot observed data along the way:
 
 ```{r fig1}
-newdata=data %>%
-  select(which_behaviour) %>% 
+newdata <- data %>%
+  select(which_behaviour) %>%
   distinct() %>%
-  expand_grid(BOX=data$BOX[1],ID=data$ID[1],is.female=0,scale_logheight=0,Density=c(1:30)/1) %>% 
-  mutate(scale_Density=(Density-attr(data$scale_Density,"scaled:center"))/attr(data$scale_Density,"scaled:scale")) %>% 
-  add_fitted_draws(mod,resp="behave",re_formula = NA)
+  expand_grid(BOX = data$BOX[1], ID = data$ID[1], is.female = 0, scale_logheight = 0, Density = c(1:30) / 1) %>%
+  mutate(scale_Density = (Density - attr(data$scale_Density, "scaled:center")) / attr(data$scale_Density, "scaled:scale")) %>%
+  add_fitted_draws(mod, resp = "behave", re_formula = NA)
 
 
-p1<-newdata %>% 
-  filter(which_behaviour=="Disp") %>% 
-  ggplot()+
-  stat_lineribbon(aes(x=Density,y=.value),.width=0.95,fill="grey90") + 
-  geom_jitter(data=data %>% filter(which_behaviour=="Disp") %>% group_by(Density,BOX) %>% summarise(behave=mean(behave)),aes(x=Density,y=behave),col="grey60")+
-  geom_point(data=data %>% filter(which_behaviour=="Disp") %>% group_by(Density) %>% summarise(behave=mean(behave)),aes(x=Density,y=behave),cex=3)+
-  scale_x_continuous("")+
-  scale_y_continuous("Dispersal rate")+
-  theme_bw()+theme(legend.position = "none")
+p1 <- newdata %>%
+  filter(which_behaviour == "Disp") %>%
+  ggplot() +
+  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = median_hdi, fill = "grey90") +
+  geom_jitter(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
+  geom_point(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), cex = 3) +
+  scale_x_continuous("") +
+  scale_y_continuous("Dispersal rate") +
+  theme_bw() +
+  theme(legend.position = "none")
 
-p2<-newdata %>% 
-  filter(which_behaviour=="Active") %>% 
-  ggplot()+
-  stat_lineribbon(aes(x=Density,y=.value),.width=0.95,fill="grey90") + 
-  geom_jitter(data=data %>% filter(which_behaviour=="Active") %>% group_by(Density,BOX) %>% summarise(behave=mean(behave)),aes(x=Density,y=behave),col="grey60")+
-  geom_point(data=data %>% filter(which_behaviour=="Active") %>% group_by(Density) %>% summarise(behave=mean(behave)),aes(x=Density,y=behave),cex=3)+
-  scale_x_continuous("Density (snails per box)")+
-  scale_y_continuous("Probability of activity")+
-  theme_bw()+theme(legend.position = "none")
+p2 <- newdata %>%
+  filter(which_behaviour == "Active") %>%
+  ggplot() +
+  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = median_hdi, fill = "grey90") +
+  geom_jitter(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
+  geom_point(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), cex = 3) +
+  scale_x_continuous("Density (snails per box)") +
+  scale_y_continuous("Probability of activity") +
+  theme_bw() +
+  theme(legend.position = "none")
 
-(p1/p2)+plot_annotation(tag_levels="A")
+(p1 / p2) + plot_annotation(tag_levels = "A")
 
 ```
 
+
+The next 2 figures are much easier to do if we have a dataset with Dispersal and Activity on two separate columns again. we could use "data0", but let's make a new, cleaner one:
+
+```{r behave-wide}
+behave_wide <- data %>%
+  select(which_behaviour, behave, ID) %>%
+  pivot_wider(names_from = which_behaviour, values_from = behave)
+```
+
+We want to show that dispersal and activity are linked. To do that, we need to use the fixed intercepts for each, and the values for the "latent behavioural variable" (random effects of individual ID) to get the probability of one as a function of the other:
 ```{r fig2}
 
-newdata<-data %>% select(which_behaviour,behave,ID) %>% distinct()
-newdata<-as_tibble(ranef(mod,summary = FALSE)$ID[,,"behave_Intercept"]) %>% 
+newdata <- as_tibble(ranef(mod, summary = FALSE)$ID[, , "behave_Intercept"]) %>%
   mutate(
-    post_disp=select(.,all_of(subset(newdata$ID,newdata$which_behaviour=="Disp" & newdata$behave==1))) %>% rowMeans(),
-    post_res=select(.,all_of(subset(newdata$ID,newdata$which_behaviour=="Disp" & newdata$behave==0))) %>% rowMeans(),
-    post_act=select(.,all_of(subset(newdata$ID,newdata$which_behaviour=="Active" & newdata$behave==1))) %>% rowMeans(),
-    post_still=select(.,all_of(subset(newdata$ID,newdata$which_behaviour=="Active" & newdata$behave==0))) %>% rowMeans(),
-  ) %>% 
-  cbind(posterior_samples(mod) %>% 
-          select(meanlogitActive=b_behave_which_behaviourActive,meanlogitDisp=b_behave_which_behaviourDisp)) %>% 
-  mutate(post_disp=post_disp+meanlogitActive,post_res=post_res+meanlogitActive,
-         post_act=post_act+meanlogitDisp,post_still=post_still+meanlogitDisp) %>% 
-  select(post_disp,post_res,post_act,post_still)
+    post_disp = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1))) %>% rowMeans(),
+    post_res = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 0))) %>% rowMeans(),
+    post_act = select(., all_of(subset(behave_wide$ID, behave_wide$Active == 1))) %>% rowMeans(),
+    post_still = select(., all_of(subset(behave_wide$ID, behave_wide$Active == 0))) %>% rowMeans(),
+  ) %>%
+  cbind(posterior_samples(mod) %>%
+    select(meanlogitActive = b_behave_which_behaviourActive, meanlogitDisp = b_behave_which_behaviourDisp)) %>%
+  mutate(
+    post_disp = post_disp + meanlogitActive, post_res = post_res + meanlogitActive,
+    post_act = post_act + meanlogitDisp, post_still = post_still + meanlogitDisp
+  ) %>%
+  select(post_disp, post_res, post_act, post_still)
 
-behave_wide<-data %>% 
-  select(which_behaviour,behave,ID) %>% 
-  pivot_wider(names_from=which_behaviour,values_from=behave)
-
-p4 <- newdata %>% 
-  select(post_act,post_still) %>% 
-  pivot_longer(everything(),names_to="Active") %>%
-  mutate(Active=fct_recode(Active,`0`="post_still",`1`="post_act")) %>% 
-  ggplot()+
-  geom_col(data=behave_wide %>% 
-             group_by(Active) %>% 
-             summarise(Disp=mean(Disp)),aes(x=factor(Active),y=Disp),col="black",fill="white")+
-  geom_eye(aes(x=Active,y=invlogit(value)),.width=c(0,0.95))+
-  scale_x_discrete("Active post dispersal?",labels=c("no","yes"))+
-  scale_y_continuous("Dispersal rate",limits=c(0,1))+
+p3 <- newdata %>%
+  select(post_disp, post_res) %>%
+  pivot_longer(everything(), names_to = "Disp") %>%
+  mutate(Disp = fct_recode(Disp, `0` = "post_res", `1` = "post_disp")) %>%
+  ggplot() +
+  geom_col(data = behave_wide %>%
+    group_by(Disp) %>%
+    summarise(Active = mean(Active == 1)), aes(x = factor(Disp), y = Active), col = "black", fill = "white") +
+  geom_eye(aes(x = Disp, y = invlogit(value)), .width = c(0, 0.95)) +
+  scale_x_discrete("Dispersal status", labels = c("Resident", "Disperser")) +
+  scale_y_continuous("Activity probability", limits = c(0, 1)) +
   theme_bw()
 
-(newdata$post_act-newdata$post_still) %>% median_hdi()
-(newdata$post_disp-newdata$post_res) %>% median_hdi()
-
-p5 <- newdata %>% 
-  select(post_disp,post_res) %>% 
-  pivot_longer(everything(),names_to="Disp") %>%
-  mutate(Disp=fct_recode(Disp,`0`="post_res",`1`="post_disp")) %>% 
-  ggplot()+
-  geom_col(data=behave_wide %>% 
-             group_by(Disp) %>% 
-             summarise(Active=mean(Active==1)),aes(x=factor(Disp),y=Active),col="black",fill="white")+
-  geom_eye(aes(x=Disp,y=invlogit(value)),.width=c(0,0.95))+
-  scale_x_discrete("Dispersal status",labels=c("Resident","Disperser"))+
-  scale_y_continuous("Activity probability",limits=c(0,1))+
+p4 <- newdata %>%
+  select(post_act, post_still) %>%
+  pivot_longer(everything(), names_to = "Active") %>%
+  mutate(Active = fct_recode(Active, `0` = "post_still", `1` = "post_act")) %>%
+  ggplot() +
+  geom_col(data = behave_wide %>%
+    group_by(Active) %>%
+    summarise(Disp = mean(Disp)), aes(x = factor(Active), y = Disp), col = "black", fill = "white") +
+  geom_eye(aes(x = Active, y = invlogit(value)), .width = c(0, 0.95)) +
+  scale_x_discrete("Active post dispersal?", labels = c("no", "yes")) +
+  scale_y_continuous("Dispersal rate", limits = c(0, 1)) +
   theme_bw()
 
-p5+p4
+p3 + p4 ### it looks like there is a link
+
+### let's confirm it!
+(newdata$post_act - newdata$post_still) %>% median_hdi()
+(newdata$post_disp - newdata$post_res) %>% median_hdi()
+
 ```
 
+
+For the last figure, we want to show the expected relative shell mass for individual behaving differently (Disperser-Active, Disperser-Inactive, Resident-Active and Resident-Inactive). To do that, we need the random effect of individual ID for shell_mass:
 ```{r fig3}
-newdata<-data %>% select(which_behaviour,behave,ID) %>% distinct()
-newdata<-as_tibble(ranef(mod,summary = FALSE)$ID[,,"scalelogshellmass_Intercept"]) %>% 
+as_tibble(ranef(mod, summary = FALSE)$ID[, , "scalelogshellmass_Intercept"]) %>%
   mutate(
-    post_disp=select(.,all_of(subset(newdata$ID,newdata$which_behaviour=="Disp" & newdata$behave==1))) %>% rowMeans(na.rm=TRUE),
-    post_res=select(.,all_of(subset(newdata$ID,newdata$which_behaviour=="Disp" & newdata$behave==0))) %>% rowMeans(na.rm=TRUE),
-    post_act=select(.,all_of(subset(newdata$ID,newdata$which_behaviour=="Active" & newdata$behave==1))) %>% rowMeans(na.rm=TRUE),
-    post_still=select(.,all_of(subset(newdata$ID,newdata$which_behaviour=="Active" & newdata$behave==0))) %>% rowMeans(na.rm=TRUE),
-  ) %>% 
-  mutate(post_disp=post_disp,post_res=post_res,
-         post_act=post_act,post_still=post_still) %>% 
-  select(post_disp,post_res,post_act,post_still)
-
-
-p6 <- newdata %>% 
-  select(post_act,post_still) %>% 
-  pivot_longer(everything(),names_to="Active") %>%
-  mutate(Active=fct_recode(Active,`0`="post_still",`1`="post_act")) %>% 
-  ggplot()+
-  geom_eye(aes(x=fct_rev(Active),y=exp(value*attr(data$scale_logshellmass,"scaled:scale"))),.width=c(0,0.95))+
-  scale_x_discrete("Active post dispersal?",labels=c("no","yes"))+
-  scale_y_continuous("",limits=c(0.95,1.05))+
-  geom_hline(yintercept=1,lty=2)+
+    post_disp_act = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1 & behave_wide$Active == 1))) %>% rowMeans(na.rm = TRUE),
+    post_res_act = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 0 & behave_wide$Active == 1))) %>% rowMeans(na.rm = TRUE),
+    post_disp_still = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1 & behave_wide$Active == 0))) %>% rowMeans(na.rm = TRUE),
+    post_res_still = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 0 & behave_wide$Active == 0))) %>% rowMeans(na.rm = TRUE),
+  ) %>%
+  select(post_disp_act, post_disp_still, post_res_act, post_res_still) %>%
+  pivot_longer(everything()) %>%
+  mutate(name = fct_recode(name,
+    `Disperser and Active` = "post_disp_act",
+    `Resident and Active` = "post_res_act",
+    `Disperser and Inactive` = "post_disp_still",
+    `Resident and Inactive` = "post_res_still"
+  )) %>%
+  ggplot() +
+  geom_eye(aes(x = name, y = exp(value * attr(data$scale_logshellmass, "scaled:scale"))), .width = c(0, 0.95)) +
+  scale_x_discrete("") +
+  scale_y_continuous("Predicted relative shell mass", breaks = c(0.95, 1, 1.05)) +
+  geom_hline(yintercept = 1, lty = 2) +
   theme_bw()
-
-exp((newdata$post_act-newdata$post_still)*attr(data$scale_logshellmass,"scaled:scale")) %>% median_hdi()
-exp((newdata$post_disp-newdata$post_res)*attr(data$scale_logshellmass,"scaled:scale")) %>% median_hdi()
-
-p7 <- newdata %>% 
-  select(post_disp,post_res) %>% 
-  pivot_longer(everything(),names_to="Disp") %>%
-  mutate(Disp=fct_recode(Disp,`0`="post_res",`1`="post_disp")) %>% 
-  ggplot()+
-  geom_eye(aes(x=fct_rev(Disp),y=exp(value*attr(data$scale_logshellmass,"scaled:scale"))),.width=c(0,0.95))+
-  scale_x_discrete("Dispersal status",labels=c("Resident","Disperser"))+
-  scale_y_continuous("Relative Shell mass",limits=c(0.95,1.05))+
-  geom_hline(yintercept=1,lty=2)+
-  theme_bw()
-
-(p7+p6)
 ```
 
 # Supplementary Materials
 
-```{r supplementary-models}
+```{r supplementary-model1a}
 
-####models for supplementary
+#### models for supplementary
 
-mod_S1a <- data %>% filter(mass_measurement=="Shell_Mass1") %>% 
-  group_by(BOX) %>% 
-  summarise(Density=mean(Density),Nfemales=sum(Sex_dissection=="F")) %>% 
-  ungroup() %>% 
-  brm(Nfemales|trials(Density)~1,family=binomial,
-      prior=c(set_prior("normal(0,1.5)",class="Intercept")),data=., seed = 42
+mod_S1a <- data %>%
+  filter(measurement_order == 1) %>% ## filter to avoid duplicates
+  group_by(BOX) %>%
+  summarise(Density = mean(Density), Nfemales = sum(Sex_dissection == "F")) %>%
+  ungroup() %>%
+  brm(Nfemales | trials(Density) ~ 1,
+    family = binomial,
+    prior = c(set_prior("normal(0,1.5)", class = "Intercept")), data = ., seed = 42
   )
 
-mod_S1b <- data %>% filter(mass_measurement=="Shell_Mass1") %>% 
-  group_by(BOX) %>% 
-  summarise(Density=mean(Density),Nfemales=sum(Sex_dissection=="F")) %>% 
-  ungroup() %>% 
-  brm(Nfemales|trials(Density)~0+factor(Density),family=binomial,
-      prior=c(set_prior("normal(0,1.5)",class="b")),data=., seed = 42
+mod_S1a %>%
+  posterior_samples() %>%
+  select(contains("Intercept")) %>%
+  pivot_longer(everything()) %>%
+  group_by(name) %>%
+  median_hdi()
+```
+
+```{r supplementary-model1b}
+mod_S1b <- data %>%
+  filter(measurement_order == 1) %>%
+  group_by(BOX) %>%
+  summarise(Density = mean(Density), Nfemales = sum(Sex_dissection == "F")) %>%
+  ungroup() %>%
+  brm(Nfemales | trials(Density) ~ 0 + factor(Density),
+    family = binomial,
+    prior = c(set_prior("normal(0,1.5)", class = "b")), data = ., seed = 42
   )
 
-mod_S3 <- brm(behave~scale_Density+scale_logheight+is.female+Disp2+(1|BOX),family=bernoulli,
-             prior=c(set_prior("normal(0,1.5)",class="Intercept"),
-                     set_prior("normal(0,1)",class="b"),
-                     set_prior("normal(0,1)",class="sd")),data=subset(data,which_behaviour=="Active"), seed = 42
-)
+mod_S1b %>%
+  posterior_samples() %>%
+  select(starts_with(c("Intercept", "b_"))) %>%
+  pivot_longer(everything()) %>%
+  group_by(name) %>%
+  median_hdi()
+```
+
+```{r supplementary-model3}
+mod_S3 <- data %>%
+  filter(which_behaviour == "Active") %>%
+  brm(behave ~ scale_Density + scale_logheight + is.female + Disp2 + (1 | BOX),
+    family = bernoulli,
+    prior = c(
+      set_prior("normal(0,1.5)", class = "Intercept"),
+      set_prior("normal(0,1)", class = "b"),
+      set_prior("normal(0,1)", class = "sd")
+    ), data = ., seed = 42
+  )
+
+mod_S3 %>%
+  posterior_samples() %>%
+  select(starts_with(c("Intercept", "b_", "sd_"))) %>%
+  pivot_longer(everything()) %>%
+  group_by(name) %>%
+  median_hdi()
 ```
