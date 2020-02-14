@@ -1,8 +1,16 @@
 ---
-title: "script for the analysis of Pomatias"
-author: "Maxime Dahirel"
+title: "script for  'Increased population density depresses activity but does not influence dispersal in the snail *Pomatias elegans*'"
+author: 
+  - "**Maxime Dahirel** (script author)"
+  - Loïc Menut
+  - Armelle Ansart
 date: "13/02/2020"
-output: html_document
+output: 
+  html_document:
+    theme: yeti
+    toc: TRUE
+    toc_float: TRUE
+    code_download: TRUE
 editor_options: 
   chunk_output_type: console
 ---
@@ -11,22 +19,14 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
 ```
 
-The present R Markdown file contains the analysis script for the manuscript entitled 
-
-"Increased population density depresses activity but does not influence dispersal in the snail *Pomatias elegans*" 
-
-(authors: Maxime Dahirel, Loic Menut, and Armelle Ansart)
-
-, along with narrative comments to help the reader. 
-
-(A "classical" R script version is also available in the same folder, for readers who'd rather use that. That version is much less commented, but both run the same analyses)
+(NB: A "classical" .R script version is also available in the same folder as this file, for readers who'd rather use that. That version is much less commented, but both run the same analyses)
 
 
-## Introduction
+## **Introduction**
 
 The aims of this study were to:
 
-- determine whetehr dispersal and activity are density-dependent in *Pomatias elegans*
+- determine whether dispersal and activity are density-dependent in *Pomatias elegans*
 - determine whether these two traits were linked
 - determine whether there was a link between behaviour and morphological defence, using (relative) shell weight as a proxy for the latter
 
@@ -35,11 +35,12 @@ To do so, we exposed snails to different densities and examined their dispersal 
 (see manuscript for details)
 
 
-## Raw data description and wrangling
+## **Starters and data wrangling**
 
 First, let's load the packages we'll need:
 
 ```{r load-packages}
+library(here)
 library(arm)
 library(matrixStats)
 library(tidyverse)
@@ -55,30 +56,30 @@ Now we load the raw data files:
 ```{r load-raw-datafiles}
 ## Load raw dataset
 data0 <- read.table("./dataset_main_pomatias.txt", header = TRUE)
-shell_morpho <- read.table("./dataset_shellmass_pomatias.txt", header = TRUE)
+shell_info <- read.table("./dataset_shellmass_pomatias.txt", header = TRUE)
 # data_discrimin <- read.table("./discrimin_pomatias.txt", header = TRUE)
 ```
 
-The "data0" dataset contains the following columns:
+The `data0` dataset contains the following columns:
 
-- *ID* : unique individual ID
-- *Date* : (format dd/mm/yy) day the dispersal test was started
-- *Box_code*: numeric code of test box during dispersal. Box_codes are only unique within test dates; you need to combine it with *Date* to get a unique code for each box (this wil be done below)
-- *Density*: number of individuals in the same box during the dispersal test
-- *Sex_true*: (M = male, F = female) sex determined by dissection after the tests, using presence of male genitalia = male as a criterion
-- *Sex_predicted*: sex inferred from a Linear Discriminant Analysis using shell morphometrics; used for assigning snails to boxes in an approximately sex-balanced fashion
-- *Disp* : (binary no/yes) whether or not the snail dispersed (crossed to the second half of the two-patch system) after 4 days of test
-- *Time_sec* : (in seconds) time to activity during the activity test. Values >= 1200 are censored, that is, they denote the time at which we stopped observing, NOT the time at which they become active 
-- *Active* : (binary 0/1) whether or not the snail got active during 
-- *Height*, *Diametre*, *PeristomeH* : Shell height, width and aperture height for each shell (in mm) 
+- `ID` : unique individual ID
+- `Date` : (format dd/mm/yy) day the dispersal test was started
+- `Box_code`: numeric code of test box during dispersal. Box_codes are only unique within test dates; you need to combine it with `Date` to get a unique code for each box (this wil be done below)
+- `Density`: number of individuals in the same box during the dispersal test
+- `Sex_true`: (M = male, F = female) sex determined by dissection after the tests, using presence of male genitalia = male as a criterion
+- `Sex_predicted`: sex inferred from a Linear Discriminant Analysis using shell morphometrics; used for assigning snails to boxes in an approximately sex-balanced fashion
+- `Disp` : (binary no/yes) whether or not the snail dispersed (crossed to the second half of the two-patch system) after 4 days of test
+- `Time_sec` : (in seconds) time to activity during the activity test. Values >= 1200 are censored, that is, they denote the time at which we stopped observing, NOT the time at which they become active 
+- `Active` : (binary 0/1) whether or not the snail got active during 
+- `Height`, `Diametre`, `PeristomeH` : Shell height, width and aperture height for each shell (in mm) 
 
-The "shell_morpho" dataset adds shell information not present in the main dataset and contains 4 columns: 
+The `shell_info` dataset adds shell information not present in the main dataset and contains 4 columns: 
 
-- *uniqueID* : a number uniquely identifying each individual (note that this number is contained in the *ID* string of "data0" after the first "_"; this will be used to merge them)
-- *Shell_Mass1* and *Shell_Mass2*:  successive measures of shell mass for each snail (in mg)
-- *area* : (unused, in cm²) shell area when photographed as in Fig. 1 of the article
+- `uniqueID` : a number uniquely identifying each individual (note that this number is contained in the `ID` string of `data0` after the first "_"; this will be used to merge them)
+- `Shell_Mass1` and `Shell_Mass2`:  successive measures of shell mass for each snail (in mg)
+- `area` : (unused, in cm²) shell area when photographed as in Fig. 1 of the article
 
-For our analysis, we're going to need to (a) combine the "data0" and "morpho" datasets, (b) create a bunch of new variables from the original ones, and (c) convert the dataset into a "long" format where both shell mass measures are in the same column, as well as both behavioural measures (the latter is not strictly needed, but it makes fitting a "latent" behavioural variable way easier).
+For our analysis, we're going to need to (a) combine the `data0` and `shell_info` datasets, (b) create a bunch of new variables from the original ones, and (c) convert the dataset into a "long" format where both shell mass measures are in the same column, as well as both behavioural measures (the latter is not strictly needed, but it makes fitting a "latent" behavioural variable way easier).
 
 So let's do that:
 
@@ -92,7 +93,7 @@ data <- as_tibble(data0) %>%
     scale_Density = scale(Density),
     uniqueID = as.numeric(str_split_fixed(ID, "_", 3)[, 2])
   ) %>%
-  left_join(shell_morpho) %>%
+  left_join(shell_info) %>%
   mutate(behave_Disp = as.numeric(Disp == "yes"), behave_Active = Active) %>%
   select(Date, BOX, uniqueID, ID,
     Density, scale_Density,
@@ -102,6 +103,10 @@ data <- as_tibble(data0) %>%
     Shell_Mass1, Shell_Mass2,
     Disp2, behave_Active, behave_Disp, Time_sec
   )
+
+```
+
+```{r data-wrangling2}
 
 data1 <- data %>%
   select(-c(behave_Active, behave_Disp)) %>%
@@ -127,7 +132,7 @@ data <- left_join(data1, data2) %>%
   mutate(which_behaviour = fct_recode(which_behaviour, Active = "behave_Active", Disp = "behave_Disp"))
 ```
 
-```{r data-wrangling2}
+```{r data-wrangling3}
 data <- data %>%
   mutate(
     scale_logshellmass = scale(log(Shell_mass)),
@@ -139,24 +144,24 @@ data <- data %>%
 
 ... and *Voilà*! We have our final dataset! But what's in it, you may ask? Let's look:
 
-- *Date*, *uniqueID*, *ID*, *Density*, *Sex_predicted* and *Time_sec* are the same as above 
--  *Sex_dissection*, *Shell_width*, *Shell_height* and *Aperture_height* are renamed versions of *Sex_true*,  *Diametre*, *Height*, *PeristomeH* for accuracy (they are otherwise unchanged) 
-- *scale_Density* : *Density*, centred and scaled to unit 1SD
-- *BOX* : a unique identifier for each tested group of snails
-- *is.female* : a dummy centred numerical variable (-0.5 for *Sex_dissection* = Male, +0.5 for Female)
-- *Disp2*: a dummy centred numerical variable (-0.5 for *Disp* = "no", +0.5 for "yes")
-- *Shell_mass* : *Shell_Mass1* and *Shell_Mass2*, converted to long format
-- *measurement order*: 1 or 2, is the first measure of *Shell_Mass* or behaviour or the second? (for Behaviour, Dispersal always comes first, then Activity)
-- *behave* : (binary 0/1) did the individual showed the behaviour denoted in *which_behaviour* during the corresponding test?
-- *scale_logshellmass* : *Shell_mass*, ln-transformed and then centred+scaled to unit 1SD
-- *scale_logheight* : *Shell_height*, ln-transformed and then centred+scaled to unit 1SD
+- `Date`, `uniqueID`, `ID`, `Density`, `Sex_predicted` and `Time_sec` are the same as above 
+-  `Sex_dissection`, `Shell_width`, `Shell_height` and `Aperture_height` are renamed versions of `Sex_true`,  `Diametre`, `Height`, `PeristomeH` for accuracy (they are otherwise unchanged) 
+- `scale_Density` : `Density`, centred and scaled to unit 1SD
+- `BOX` : a unique identifier for each group/box of snails we tested
+- `is.female` : a dummy numerical variable (-0.5 for `Sex_dissection` = Male, +0.5 for Female)
+- `Disp2`: a dummy numerical variable (-0.5 for `Disp` = "no", +0.5 for "yes")
+- `Shell_mass` : `Shell_Mass1` and `Shell_Mass2`, converted to long format
+- `behave` : (binary 0/1) did the individual showed the behaviour denoted in `which_behaviour` during the corresponding test?
+- `measurement order`: 1 or 2, is the first measure of `Shell_Mass` / `behave` or the second? (for `behave`, Dispersal always comes first, then Activity)
+- `scale_logshellmass` : `Shell_mass`, ln-transformed and then centred+scaled to unit 1SD
+- `scale_logheight` : `Shell_height`, ln-transformed and then centred+scaled to unit 1SD
 
-## Main model
+## **Main model**
 
-Now, let's fit our main model (see description in the methods and supplementary material of the paper).
-Note how it is a trivariate model (Dispersal, Activity, Shell Mass) but only two submodels are fitted. That's on purpose, we grouped Dispersal and Activity in the same variable and submodel to make it easier to write the shared random effect of individual ID (which corresponds to a latent behavioural variable).
+Now, let's fit our main model (please see description in the methods and supplementary material of the paper).
+Note how it is a trivariate model (Dispersal, Activity, Shell Mass) but only two submodels are fitted. That's on purpose, we grouped Dispersal and Activity in the same variable and submodel to make it easier to write in the shared random effect of individual `ID` (which corresponds to a latent behavioural variable).
 
-It should need 10000-20000 iterations per chain post-warmup to reach satisfactory effective sample sizes for everything (depends on your threshold). Runtime on a laptop with 2 cores used in parallel and 12 Gb memory: about 8-10h.
+It should need 10000-20000 iterations per chain post-warmup to reach satisfactory effective sample sizes for everything (depends on your threshold). Runtime on a laptop with 2 cores used in parallel and 12 Gb memory: about 8-10h. If you just want to have a quick look, convergence happens much, **much** faster, within a few 100s of iterations. Just set `iter` to 250-500 for instance and `warmup` to half of that; chains should look good enough to have a general idea of what's happening
 
 ```{r main-model}
 ####first, our priors
@@ -214,7 +219,9 @@ pp_check(mod, resp = "scalelogshellmass", newdata = data %>% filter(is.na(scale_
 ```
 
 
-## Plotting
+## **Making figures**
+
+### Figure 1
 
 For the first figure, we want to look at how dispersal and activity probability are predicted to change with density, and plot observed data along the way:
 
@@ -253,13 +260,14 @@ p2 <- newdata %>%
 
 ```
 
+### Figure 2
 
-The next 2 figures are much easier to do if we have a dataset with Dispersal and Activity on two separate columns again. we could use "data0", but let's make a new, cleaner one:
+The next 2 figures are much easier to do if we have a dataset with Dispersal and Activity on two separate columns again. Let's make a clean one from `data0`:
 
 ```{r behave-wide}
-behave_wide <- data %>%
-  select(which_behaviour, behave, ID) %>%
-  pivot_wider(names_from = which_behaviour, values_from = behave)
+behave_wide <- data0 %>%
+  select(Disp,Active, ID) %>%
+  mutate(Disp=as.numeric(Disp=="yes"))
 ```
 
 We want to show that dispersal and activity are linked. To do that, we need to use the fixed intercepts for each, and the values for the "latent behavioural variable" (random effects of individual ID) to get the probability of one as a function of the other:
@@ -267,23 +275,23 @@ We want to show that dispersal and activity are linked. To do that, we need to u
 
 newdata <- as_tibble(ranef(mod, summary = FALSE)$ID[, , "behave_Intercept"]) %>%
   mutate(
-    post_disp = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1))) %>% rowMeans(),
-    post_res = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 0))) %>% rowMeans(),
-    post_act = select(., all_of(subset(behave_wide$ID, behave_wide$Active == 1))) %>% rowMeans(),
-    post_still = select(., all_of(subset(behave_wide$ID, behave_wide$Active == 0))) %>% rowMeans(),
+    post_act_ifdisp = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1))) %>% rowMeans(),
+    post_act_ifres = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 0))) %>% rowMeans(),
+    post_disp_ifact = select(., all_of(subset(behave_wide$ID, behave_wide$Active == 1))) %>% rowMeans(),
+    post_disp_ifstill = select(., all_of(subset(behave_wide$ID, behave_wide$Active == 0))) %>% rowMeans(),
   ) %>%
   cbind(posterior_samples(mod) %>%
     select(meanlogitActive = b_behave_which_behaviourActive, meanlogitDisp = b_behave_which_behaviourDisp)) %>%
   mutate(
-    post_disp = post_disp + meanlogitActive, post_res = post_res + meanlogitActive,
-    post_act = post_act + meanlogitDisp, post_still = post_still + meanlogitDisp
+    post_act_ifdisp = post_act_ifdisp + meanlogitActive, post_act_ifres = post_act_ifres + meanlogitActive,
+    post_disp_ifact = post_disp_ifact + meanlogitDisp, post_disp_ifstill  = post_disp_ifstill  + meanlogitDisp
   ) %>%
-  select(post_disp, post_res, post_act, post_still)
+  select(post_act_ifdisp, post_act_ifres, post_disp_ifact, post_disp_ifstill)
 
 p3 <- newdata %>%
-  select(post_disp, post_res) %>%
+  select(post_act_ifdisp, post_act_ifres) %>%
   pivot_longer(everything(), names_to = "Disp") %>%
-  mutate(Disp = fct_recode(Disp, `0` = "post_res", `1` = "post_disp")) %>%
+  mutate(Disp = fct_recode(Disp, `0` = "post_act_ifres", `1` = "post_act_ifdisp")) %>%
   ggplot() +
   geom_col(data = behave_wide %>%
     group_by(Disp) %>%
@@ -294,9 +302,9 @@ p3 <- newdata %>%
   theme_bw()
 
 p4 <- newdata %>%
-  select(post_act, post_still) %>%
+  select(post_disp_ifact, post_disp_ifstill) %>%
   pivot_longer(everything(), names_to = "Active") %>%
-  mutate(Active = fct_recode(Active, `0` = "post_still", `1` = "post_act")) %>%
+  mutate(Active = fct_recode(Active, `0` = "post_disp_ifstill", `1` = "post_disp_ifact")) %>%
   ggplot() +
   geom_col(data = behave_wide %>%
     group_by(Active) %>%
@@ -309,11 +317,12 @@ p4 <- newdata %>%
 p3 + p4 ### it looks like there is a link
 
 ### let's confirm it!
-(newdata$post_act - newdata$post_still) %>% median_hdi()
-(newdata$post_disp - newdata$post_res) %>% median_hdi()
+(newdata$post_disp_ifact - newdata$post_disp_ifstill) %>% median_hdi()
+(newdata$post_act_ifdisp - newdata$post_act_ifres) %>% median_hdi()
 
 ```
 
+### Figure 3
 
 For the last figure, we want to show the expected relative shell mass for individual behaving differently (Disperser-Active, Disperser-Inactive, Resident-Active and Resident-Inactive). To do that, we need the random effect of individual ID for shell_mass:
 ```{r fig3}
@@ -340,7 +349,11 @@ as_tibble(ranef(mod, summary = FALSE)$ID[, , "scalelogshellmass_Intercept"]) %>%
   theme_bw()
 ```
 
-# Supplementary Materials
+## **Supplementary Materials**
+
+We also present some models in Supplementary Materials. 
+
+The first two are used to check there is no strong evidence of biased sex-ratio in our dataset:
 
 ```{r supplementary-model1a}
 
@@ -383,6 +396,7 @@ mod_S1b %>%
   median_hdi()
 ```
 
+... and the third one is used to confirm our result that dispersal and activity are linked through a more "classical" approach than the one we used:
 ```{r supplementary-model3}
 mod_S3 <- data %>%
   filter(which_behaviour == "Active") %>%
