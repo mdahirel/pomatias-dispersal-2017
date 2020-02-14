@@ -221,11 +221,12 @@ pp_check(mod, resp = "scalelogshellmass", newdata = data %>% filter(is.na(scale_
 
 ## **Making figures**
 
-### Figure 1
+(Fig. 1 is a shell photograph, so we start at Fig.2 for data plots)
+### Figure 2
 
 For the first figure, we want to look at how dispersal and activity probability are predicted to change with density, and plot observed data along the way:
 
-```{r fig1}
+```{r fig2}
 newdata <- data %>%
   select(which_behaviour) %>%
   distinct() %>%
@@ -237,30 +238,27 @@ newdata <- data %>%
 p1 <- newdata %>%
   filter(which_behaviour == "Disp") %>%
   ggplot() +
-  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = median_hdi, fill = "grey90") +
+  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = median_hdi, fill = "grey90",alpha=0.9) +
   geom_jitter(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
   geom_point(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), cex = 3) +
   scale_x_continuous("") +
-  scale_y_continuous("Dispersal rate") +
-  theme_bw() +
-  theme(legend.position = "none")
+  scale_y_continuous("Dispersal rate")
 
 p2 <- newdata %>%
   filter(which_behaviour == "Active") %>%
   ggplot() +
-  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = median_hdi, fill = "grey90") +
+  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = median_hdi, fill = "grey90",alpha=0.9) +
   geom_jitter(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
   geom_point(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), cex = 3) +
   scale_x_continuous("Density (snails per box)") +
-  scale_y_continuous("Probability of activity") +
-  theme_bw() +
-  theme(legend.position = "none")
+  scale_y_continuous("Probability of activity")
 
-(p1 / p2) + plot_annotation(tag_levels = "A")
+(p1 / p2) + plot_annotation(tag_levels = "A") & theme_bw() &
+  theme(legend.position = "none",panel.border = element_blank(),axis.line = element_line(colour = "black"))
 
 ```
 
-### Figure 2
+### Figure 3
 
 The next 2 figures are much easier to do if we have a dataset with Dispersal and Activity on two separate columns again. Let's make a clean one from `data0`:
 
@@ -271,7 +269,7 @@ behave_wide <- data0 %>%
 ```
 
 We want to show that dispersal and activity are linked. To do that, we need to use the fixed intercepts for each, and the values for the "latent behavioural variable" (random effects of individual ID) to get the probability of one as a function of the other:
-```{r fig2}
+```{r fig3}
 
 newdata <- as_tibble(ranef(mod, summary = FALSE)$ID[, , "behave_Intercept"]) %>%
   mutate(
@@ -296,10 +294,10 @@ p3 <- newdata %>%
   geom_col(data = behave_wide %>%
     group_by(Disp) %>%
     summarise(Active = mean(Active == 1)), aes(x = factor(Disp), y = Active), col = "black", fill = "white") +
-  geom_eye(aes(x = Disp, y = invlogit(value)), .width = c(0, 0.95)) +
+  stat_eye(aes(x = Disp, y = invlogit(value)), 
+           .width = 0.95,interval_size=1,point_size=3,point_interval = median_hdi,alpha=0.9) +
   scale_x_discrete("Dispersal status", labels = c("Resident", "Disperser")) +
-  scale_y_continuous("Activity probability", limits = c(0, 1)) +
-  theme_bw()
+  scale_y_continuous("Activity probability", limits = c(0, 1))
 
 p4 <- newdata %>%
   select(post_disp_ifact, post_disp_ifstill) %>%
@@ -309,12 +307,15 @@ p4 <- newdata %>%
   geom_col(data = behave_wide %>%
     group_by(Active) %>%
     summarise(Disp = mean(Disp)), aes(x = factor(Active), y = Disp), col = "black", fill = "white") +
-  geom_eye(aes(x = Active, y = invlogit(value)), .width = c(0, 0.95)) +
+  stat_eye(aes(x = Active, y = invlogit(value)),
+           .width = 0.95,interval_size=1,point_size=3,point_interval = median_hdi,alpha=0.9) +
   scale_x_discrete("Active post dispersal?", labels = c("no", "yes")) +
-  scale_y_continuous("Dispersal rate", limits = c(0, 1)) +
-  theme_bw()
+  scale_y_continuous("Dispersal rate", limits = c(0, 1)) 
 
-p3 + p4 ### it looks like there is a link
+p3 + p4 & 
+  theme_bw() &
+  theme(legend.position = "none",panel.border = element_blank(),axis.line = element_line(colour = "black"))
+### it looks like there is a link
 
 ### let's confirm it!
 (newdata$post_disp_ifact - newdata$post_disp_ifstill) %>% median_hdi()
@@ -322,10 +323,10 @@ p3 + p4 ### it looks like there is a link
 
 ```
 
-### Figure 3
+### Figure 4
 
 For the last figure, we want to show the expected relative shell mass for individual behaving differently (Disperser-Active, Disperser-Inactive, Resident-Active and Resident-Inactive). To do that, we need the random effect of individual ID for shell_mass:
-```{r fig3}
+```{r fig4}
 as_tibble(ranef(mod, summary = FALSE)$ID[, , "scalelogshellmass_Intercept"]) %>%
   mutate(
     post_disp_act = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1 & behave_wide$Active == 1))) %>% rowMeans(na.rm = TRUE),
@@ -342,11 +343,13 @@ as_tibble(ranef(mod, summary = FALSE)$ID[, , "scalelogshellmass_Intercept"]) %>%
     `Resident and Inactive` = "post_res_still"
   )) %>%
   ggplot() +
-  geom_eye(aes(x = name, y = exp(value * attr(data$scale_logshellmass, "scaled:scale"))), .width = c(0, 0.95)) +
-  scale_x_discrete("") +
-  scale_y_continuous("Predicted relative shell mass", breaks = c(0.95, 1, 1.05)) +
   geom_hline(yintercept = 1, lty = 2) +
-  theme_bw()
+  stat_eye(aes(x = name, y = exp(value * attr(data$scale_logshellmass, "scaled:scale"))), 
+           .width = 0.95,interval_size=1,point_size=3,point_interval = median_hdi,alpha=0.9) +
+  scale_x_discrete("") +
+  scale_y_continuous("Predicted relative shell mass (posterior)", breaks = c(0.95, 1, 1.05)) +
+  theme_bw()+
+  theme(legend.position = "none",panel.border = element_blank(),axis.line = element_line(colour = "black"))
 ```
 
 ## **Supplementary Materials**
