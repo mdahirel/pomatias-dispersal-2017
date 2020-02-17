@@ -46,6 +46,7 @@ library(matrixStats)
 library(tidyverse)
 library(rstan)
 library(tidybayes)
+library(bayesplot)
 library(brms)
 library(patchwork)
 rstan_options(auto_write = TRUE)
@@ -103,7 +104,6 @@ data <- as_tibble(data0) %>%
     Shell_Mass1, Shell_Mass2,
     Disp2, behave_Active, behave_Disp, Time_sec
   )
-
 ```
 
 ```{r data-wrangling2}
@@ -152,7 +152,7 @@ data <- data %>%
 - `Disp2`: a dummy numerical variable (-0.5 for `Disp` = "no", +0.5 for "yes")
 - `Shell_mass` : `Shell_Mass1` and `Shell_Mass2`, converted to long format
 - `behave` : (binary 0/1) did the individual showed the behaviour denoted in `which_behaviour` during the corresponding test?
-- `measurement order`: 1 or 2, is the first measure of `Shell_Mass` / `behave` or the second? (for `behave`, Dispersal always comes first, then Activity)
+- `measurement order`: 1 or 2, is it the first measure of `Shell_Mass` / `behave` or the second? (for `behave`, Dispersal always comes first, then Activity)
 - `scale_logshellmass` : `Shell_mass`, ln-transformed and then centred+scaled to unit 1SD
 - `scale_logheight` : `Shell_height`, ln-transformed and then centred+scaled to unit 1SD
 
@@ -161,10 +161,10 @@ data <- data %>%
 Now, let's fit our main model (please see description in the methods and supplementary material of the paper).
 Note how it is a trivariate model (Dispersal, Activity, Shell Mass) but only two submodels are fitted. That's on purpose, we grouped Dispersal and Activity in the same variable and submodel to make it easier to write in the shared random effect of individual `ID` (which corresponds to a latent behavioural variable).
 
-It should need 10000-20000 iterations per chain post-warmup to reach satisfactory effective sample sizes for everything (depends on your threshold). Runtime on a laptop with 2 cores used in parallel and 12 Gb memory: about 8-10h. If you just want to have a quick look, convergence happens much, **much** faster, within a few 100s of iterations. Just set `iter` to 250-500 for instance and `warmup` to half of that; chains should look good enough to have a general idea of what's happening
+It should need 10000-20000 iterations per chain post-warmup to reach satisfactory effective sample sizes for everything (depends on your threshold). It's the individual SDs and correlation that cause the most problem, other parameters are fine with 10-25% of that number. Runtime on a laptop with 2 cores used in parallel and 12 Gb memory: about 5-6h. If you just want to have a quick look, convergence happens much, **much** faster, within a few 100s of iterations. Just set `iter` to 250-500 for instance and `warmup` to half of that; chains should look good enough to have a general idea of what's happening
 
 ```{r main-model}
-####first, our priors
+#### first, our priors
 prior <- c(
   set_prior("normal(0,1)", class = "Intercept", resp = c("scalelogshellmass")),
   set_prior("normal(0,1)", class = "b", resp = c("behave", "scalelogshellmass")),
@@ -187,10 +187,9 @@ bf_shell_miss <- bf(scale_logshellmass | mi() ~ scale_logheight + is.female + (1
 # bf_shell_subset<-bf(scale_logshellmass_NAfilled|subset(is.shell.valid) ~ scale_logheight + is.female+(1|q|ID))
 
 mod <- brm(mvbf(bf_behave + bf_shell_miss),
-  data = data, prior = prior, iter = 100, warmup = 50,
+  data = data, prior = prior, iter = 25000, warmup = 5000,
   control = list(adapt_delta = 0.95, max_treedepth = 15), chains = 4, seed = 42
 )
-
 ```
 
 Now, some post-fitting checks:
@@ -199,21 +198,26 @@ Now, some post-fitting checks:
 summary(mod) ## everything looks good
 
 ## but summary.brmsfit gives mean and 95% quantile interval
-## I would like median and HDI instead
+## I would like mean and HDI instead
 
-mod %>%
+summary_mod <- mod %>%
   posterior_samples() %>%
-  select(starts_with(c("Intercept", "b_", "sd_", "cor_"))) %>%
+  select(starts_with(c("Intercept", "b_", "sd_", "cor_", "sigma"))) %>%
   pivot_longer(everything()) %>%
   group_by(name) %>%
-  median_hdi()
+  mean_hdi()
 
-plot(mod)
+summary_mod
+
+mcmc_rank_overlay(mod, pars = summary_mod$name)
+# a bit wonky at the extreme ranks for the cor_ID and sd_ID_behave, but still okay-ish hopefully
+# pretty good everywhere else
+
 pp_check(mod, resp = "behave") ## not really informative given it's a binary variable
 pp_check(mod, resp = "scalelogshellmass", newdata = data %>% filter(is.na(scale_logshellmass) == FALSE))
 ### need to make the pp_check on a dataset without the NAs or fail
 ### this one is not really informative either; we have a random effect of ID so it's a given it should look good
-### unless we spectacularly failed with the residual variation
+### unless we'd spectacularly failed with the residual variation
 ### but still good to check
 ### see ?pp_check for other possibilities
 ```
@@ -222,6 +226,7 @@ pp_check(mod, resp = "scalelogshellmass", newdata = data %>% filter(is.na(scale_
 ## **Making figures**
 
 (Fig. 1 is a shell photograph, so we start at Fig.2 for data plots)
+
 ### Figure 2
 
 For the first figure, we want to look at how dispersal and activity probability are predicted to change with density, and plot observed data along the way:
@@ -230,7 +235,7 @@ For the first figure, we want to look at how dispersal and activity probability 
 newdata <- data %>%
   select(which_behaviour) %>%
   distinct() %>%
-  expand_grid(BOX = data$BOX[1], ID = data$ID[1], is.female = 0, scale_logheight = 0, Density = c(1:30) / 1) %>%
+  expand_grid(BOX = data$BOX[1], ID = data$ID[1], is.female = 0, scale_logheight = 0, Density = c(1:30)) %>%
   mutate(scale_Density = (Density - attr(data$scale_Density, "scaled:center")) / attr(data$scale_Density, "scaled:scale")) %>%
   add_fitted_draws(mod, resp = "behave", re_formula = NA)
 
@@ -238,8 +243,8 @@ newdata <- data %>%
 p1 <- newdata %>%
   filter(which_behaviour == "Disp") %>%
   ggplot() +
-  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = median_hdi, fill = "grey90",alpha=0.9) +
-  geom_jitter(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
+  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = mean_hdi, fill = "grey90", alpha = 0.9) +
+  geom_point(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
   geom_point(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), cex = 3) +
   scale_x_continuous("") +
   scale_y_continuous("Dispersal rate")
@@ -247,15 +252,14 @@ p1 <- newdata %>%
 p2 <- newdata %>%
   filter(which_behaviour == "Active") %>%
   ggplot() +
-  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = median_hdi, fill = "grey90",alpha=0.9) +
-  geom_jitter(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
+  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = mean_hdi, fill = "grey90", alpha = 0.9) +
+  geom_point(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
   geom_point(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), cex = 3) +
   scale_x_continuous("Density (snails per box)") +
   scale_y_continuous("Probability of activity")
 
 (p1 / p2) + plot_annotation(tag_levels = "A") & theme_bw() &
-  theme(legend.position = "none",panel.border = element_blank(),axis.line = element_line(colour = "black"))
-
+  theme(legend.position = "none", panel.border = element_blank(), axis.line = element_line(colour = "black"))
 ```
 
 ### Figure 3
@@ -264,8 +268,8 @@ The next 2 figures are much easier to do if we have a dataset with Dispersal and
 
 ```{r behave-wide}
 behave_wide <- data0 %>%
-  select(Disp,Active, ID) %>%
-  mutate(Disp=as.numeric(Disp=="yes"))
+  select(Disp, Active, ID) %>%
+  mutate(Disp = as.numeric(Disp == "yes"))
 ```
 
 We want to show that dispersal and activity are linked. To do that, we need to use the fixed intercepts for each, and the values for the "latent behavioural variable" (random effects of individual ID) to get the probability of one as a function of the other:
@@ -282,7 +286,7 @@ newdata <- as_tibble(ranef(mod, summary = FALSE)$ID[, , "behave_Intercept"]) %>%
     select(meanlogitActive = b_behave_which_behaviourActive, meanlogitDisp = b_behave_which_behaviourDisp)) %>%
   mutate(
     post_act_ifdisp = post_act_ifdisp + meanlogitActive, post_act_ifres = post_act_ifres + meanlogitActive,
-    post_disp_ifact = post_disp_ifact + meanlogitDisp, post_disp_ifstill  = post_disp_ifstill  + meanlogitDisp
+    post_disp_ifact = post_disp_ifact + meanlogitDisp, post_disp_ifstill = post_disp_ifstill + meanlogitDisp
   ) %>%
   select(post_act_ifdisp, post_act_ifres, post_disp_ifact, post_disp_ifstill)
 
@@ -294,8 +298,9 @@ p3 <- newdata %>%
   geom_col(data = behave_wide %>%
     group_by(Disp) %>%
     summarise(Active = mean(Active == 1)), aes(x = factor(Disp), y = Active), col = "black", fill = "white") +
-  stat_eye(aes(x = Disp, y = invlogit(value)), 
-           .width = 0.95,interval_size=1,point_size=3,point_interval = median_hdi,alpha=0.9) +
+  stat_eye(aes(x = Disp, y = invlogit(value)),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi, alpha = 0.9
+  ) +
   scale_x_discrete("Dispersal status", labels = c("Resident", "Disperser")) +
   scale_y_continuous("Activity probability", limits = c(0, 1))
 
@@ -308,19 +313,19 @@ p4 <- newdata %>%
     group_by(Active) %>%
     summarise(Disp = mean(Disp)), aes(x = factor(Active), y = Disp), col = "black", fill = "white") +
   stat_eye(aes(x = Active, y = invlogit(value)),
-           .width = 0.95,interval_size=1,point_size=3,point_interval = median_hdi,alpha=0.9) +
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi, alpha = 0.9
+  ) +
   scale_x_discrete("Active post dispersal?", labels = c("no", "yes")) +
-  scale_y_continuous("Dispersal rate", limits = c(0, 1)) 
+  scale_y_continuous("Dispersal rate", limits = c(0, 1))
 
-p3 + p4 & 
+p3 + p4 &
   theme_bw() &
-  theme(legend.position = "none",panel.border = element_blank(),axis.line = element_line(colour = "black"))
+  theme(legend.position = "none", panel.border = element_blank(), axis.line = element_line(colour = "black"))
 ### it looks like there is a link
 
 ### let's confirm it!
-(newdata$post_disp_ifact - newdata$post_disp_ifstill) %>% median_hdi()
-(newdata$post_act_ifdisp - newdata$post_act_ifres) %>% median_hdi()
-
+(newdata$post_disp_ifact - newdata$post_disp_ifstill) %>% mean_hdi()
+(newdata$post_act_ifdisp - newdata$post_act_ifres) %>% mean_hdi()
 ```
 
 ### Figure 4
@@ -344,12 +349,13 @@ as_tibble(ranef(mod, summary = FALSE)$ID[, , "scalelogshellmass_Intercept"]) %>%
   )) %>%
   ggplot() +
   geom_hline(yintercept = 1, lty = 2) +
-  stat_eye(aes(x = name, y = exp(value * attr(data$scale_logshellmass, "scaled:scale"))), 
-           .width = 0.95,interval_size=1,point_size=3,point_interval = median_hdi,alpha=0.9) +
+  stat_eye(aes(x = name, y = exp(value * attr(data$scale_logshellmass, "scaled:scale"))),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi, alpha = 0.9
+  ) +
   scale_x_discrete("") +
-  scale_y_continuous("Predicted relative shell mass (posterior)", breaks = c(0.95, 1, 1.05)) +
-  theme_bw()+
-  theme(legend.position = "none",panel.border = element_blank(),axis.line = element_line(colour = "black"))
+  scale_y_continuous("Average relative shell mass (posterior)", breaks = c(0.95, 1, 1.05)) +
+  theme_bw() +
+  theme(legend.position = "none", panel.border = element_blank(), axis.line = element_line(colour = "black"))
 ```
 
 ## **Supplementary Materials**
@@ -377,7 +383,8 @@ mod_S1a %>%
   select(contains("Intercept")) %>%
   pivot_longer(everything()) %>%
   group_by(name) %>%
-  median_hdi()
+  mutate(value = invlogit(value)) %>%
+  mean_hdi()
 ```
 
 ```{r supplementary-model1b}
@@ -396,10 +403,11 @@ mod_S1b %>%
   select(starts_with(c("Intercept", "b_"))) %>%
   pivot_longer(everything()) %>%
   group_by(name) %>%
-  median_hdi()
+  mutate(value = invlogit(value)) %>%
+  mean_hdi()
 ```
 
-... and the third one is used to confirm our result that dispersal and activity are linked through a more "classical" approach than the one we used:
+... and the third one is used to confirm our result that dispersal and activity are linked, with a more "classical" approach than the one we used in the main model:
 ```{r supplementary-model3}
 mod_S3 <- data %>%
   filter(which_behaviour == "Active") %>%
@@ -417,5 +425,5 @@ mod_S3 %>%
   select(starts_with(c("Intercept", "b_", "sd_"))) %>%
   pivot_longer(everything()) %>%
   group_by(name) %>%
-  median_hdi()
+  mean_hdi()
 ```
