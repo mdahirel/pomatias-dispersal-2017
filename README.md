@@ -1,5 +1,7 @@
 # pomatias-dispersal-2017
 
+[![DOI](https://zenodo.org/badge/181884442.svg)](https://zenodo.org/badge/latestdoi/181884442)
+
 This repo contains all data and code needed to re-do the analyses and figures in our manuscript
 
 "Increased population density depresses activity but does not influence dispersal in the snail *Pomatias elegans*" (Maxime Dahirel, Loïc Menut, Armelle Ansart)
