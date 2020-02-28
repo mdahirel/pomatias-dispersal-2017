@@ -59,6 +59,7 @@ Now we load the raw data files:
 data0 <- read.table("./dataset_main_pomatias.txt", header = TRUE)
 shell_info <- read.table("./dataset_shellmass_pomatias.txt", header = TRUE)
 # data_discrimin <- read.table("./discrimin_pomatias.txt", header = TRUE)
+## the data_discrimin dataset contains info of the snails used for the initial LDA for sex (see manuscript), but is not used in the final analysis
 ```
 
 The `data0` dataset contains the following columns:
