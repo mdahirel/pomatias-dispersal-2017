@@ -6,7 +6,7 @@ This repo contains all data and code needed to re-do the analyses and figures in
 
 "Increased population density depresses activity but does not influence dispersal in the snail *Pomatias elegans*" (Maxime Dahirel, Loïc Menut, Armelle Ansart)
 
-(submitted, link to bioRxiv preprint pending)
+(link to bioRxiv preprint [here](https://www.biorxiv.org/content/10.1101/2020.02.28.970160v1))
 
 data in `.txt` format are in the `data` folder, `R` scripts in the `R`folder (both in `.R`and RMarkdown format; note that the `.R` file only contains limited comments)
 
