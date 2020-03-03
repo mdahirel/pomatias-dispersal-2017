@@ -1,6 +1,6 @@
 # pomatias-dispersal-2017
 
-[![DOI](https://zenodo.org/badge/181884442.svg)](https://zenodo.org/badge/latestdoi/181884442)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.3691977.svg)](https://doi.org/10.5281/zenodo.3691977)
 
 This repo contains all data and code needed to re-do the analyses and figures in our manuscript
 
