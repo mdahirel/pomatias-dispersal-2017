@@ -45,6 +45,9 @@ library(arm)
 library(matrixStats)
 library(tidyverse)
 library(rstan)
+## ^may be worth changing this to cmdstanr if you are reading this post summer 2020
+## look into the documentation of both rstan and cmdstanr, and use the backend argument in brm() to specify which one you want to use
+## as of august 2020 rstan versions>2.19.3 cause known problems. Do not update without checking these are solved (you can roll back if you did)
 library(tidybayes)
 library(bayesplot)
 library(brms)
@@ -165,32 +168,42 @@ Note how it is a trivariate model (Dispersal, Activity, Shell Mass) but only two
 It should need 10000-20000 iterations per chain post-warmup to reach satisfactory effective sample sizes for everything (depends on your threshold). It's the individual SDs and correlation that cause the most problem, other parameters are fine with 10-25% of that number. Runtime on a laptop with 2 cores used in parallel and 12 Gb memory: about 5-6h. If you just want to have a quick look, convergence happens much, **much** faster, within a few 100s of iterations. Just set `iter` to 250-500 for instance and `warmup` to half of that; chains should look good enough to have a general idea of what's happening
 
 ```{r main-model}
-#### first, our priors
-prior <- c(
-  set_prior("normal(0,1)", class = "Intercept", resp = c("scalelogshellmass")),
-  set_prior("normal(0,1)", class = "b", resp = c("behave", "scalelogshellmass")),
-  set_prior("normal(0,1.5)", class = "b", resp = "behave", coef = c("which_behaviourActive", "which_behaviourDisp")),
-  set_prior("normal(0,1)", class = "sd", resp = c("behave", "scalelogshellmass")),
-  set_prior("normal(0,1)", class = "sigma", resp = "scalelogshellmass"),
-  set_prior("lkj(2)", class = "cor")
-)
 
-#### then, our submodels
+if (file.exists(here("R_output", "model_main.Rdata")))
+# this if-else statement is avoid re-fitting a model when knitting Rmd file if there is already one existing in R_output
+# to override, re-run the model and re-save manually by selecting relevant code lines then knit (or delete the Rdata object)
+  {
+    load(here("R_output", "model_main.Rdata"))
+  } else {
+  #### first, our priors
+  prior <- c(
+    set_prior("normal(0,1)", class = "Intercept", resp = c("scalelogshellmass")),
+    set_prior("normal(0,1)", class = "b", resp = c("behave", "scalelogshellmass")),
+    set_prior("normal(0,1.5)", class = "b", resp = "behave", coef = c("which_behaviourActive", "which_behaviourDisp")),
+    set_prior("normal(0,1)", class = "sd", resp = c("behave", "scalelogshellmass")),
+    set_prior("normal(0,1)", class = "sigma", resp = "scalelogshellmass"),
+    set_prior("lkj(2)", class = "cor")
+  )
 
-bf_behave <- bf(behave ~ 0 + which_behaviour + which_behaviour:(scale_Density + scale_logheight + is.female) +
-  (0 + which_behaviour | BOX) + (1 | q | ID), family = bernoulli)
+  #### then, our submodels
 
-bf_shell_miss <- bf(scale_logshellmass | mi() ~ scale_logheight + is.female + (1 | q | ID))
+  bf_behave <- bf(behave ~ 0 + which_behaviour + which_behaviour:(scale_Density + scale_logheight + is.female) + (0 + which_behaviour | Date) +
+    (0 + which_behaviour | BOX) + (1 | q | ID), family = bernoulli)
 
-## an alternative to missing data imputation with mi() would be to use the subset() approach, essentially ignoring the NA values, but only for the response with NA
-## that is, no deletion of entire rows
-### leads to sensibly the same results in our case (as expected when missing data are only in responses)
-# bf_shell_subset<-bf(scale_logshellmass_NAfilled|subset(is.shell.valid) ~ scale_logheight + is.female+(1|q|ID))
+  bf_shell_miss <- bf(scale_logshellmass | mi() ~ scale_logheight + is.female + (1 | q | ID))
 
-mod <- brm(mvbf(bf_behave + bf_shell_miss),
-  data = data, prior = prior, iter = 25000, warmup = 5000,
-  control = list(adapt_delta = 0.95, max_treedepth = 15), chains = 4, seed = 42
-)
+  ## an alternative to missing data imputation with mi() would be to use the subset() approach, essentially ignoring the NA values, but only for the response with NA
+  ## that is, no deletion of entire rows
+  ### leads to sensibly the same results in our case (as expected when missing data are only in responses)
+  # bf_shell_subset<-bf(scale_logshellmass_NAfilled|subset(is.shell.valid) ~ scale_logheight + is.female+(1|q|ID))
+
+  mod <- brm(mvbf(bf_behave + bf_shell_miss),
+    data = data, prior = prior, iter = 25000, warmup = 5000, # 25000 5000
+    control = list(adapt_delta = 0.95, max_treedepth = 15), chains = 4, seed = 42
+  )
+
+  save(list = "mod", file = here("R_output", "model_main.Rdata"))
+}
 ```
 
 Now, some post-fitting checks:
@@ -221,6 +234,18 @@ pp_check(mod, resp = "scalelogshellmass", newdata = data %>% filter(is.na(scale_
 ### unless we'd spectacularly failed with the residual variation
 ### but still good to check
 ### see ?pp_check for other possibilities
+
+VarCorr(mod, summary = FALSE)$ID$cov[, "scalelogshellmass_Intercept", "scalelogshellmass_Intercept"] %>% mean_hdi()
+VarCorr(mod, summary = FALSE)$ID$cov[, "behave_Intercept", "scalelogshellmass_Intercept"] %>% mean_hdi()
+VarCorr(mod, summary = FALSE)$ID$cov[, "behave_Intercept", "behave_Intercept"] %>% mean_hdi()
+
+VarCorr(mod, summary = FALSE)$Date$cov[, "behave_which_behaviourActive", "behave_which_behaviourActive"] %>% mean_hdi()
+VarCorr(mod, summary = FALSE)$Date$cov[, "behave_which_behaviourDisp", "behave_which_behaviourDisp"] %>% mean_hdi()
+
+VarCorr(mod, summary = FALSE)$BOX$cov[, "behave_which_behaviourActive", "behave_which_behaviourActive"] %>% mean_hdi()
+VarCorr(mod, summary = FALSE)$BOX$cov[, "behave_which_behaviourDisp", "behave_which_behaviourDisp"] %>% mean_hdi()
+
+VarCorr(mod, summary = FALSE)$residual__$sd^2 %>% mean_hdi()
 ```
 
 
@@ -244,23 +269,23 @@ newdata <- data %>%
 p1 <- newdata %>%
   filter(which_behaviour == "Disp") %>%
   ggplot() +
-  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = mean_hdi, fill = "grey90", alpha = 0.9) +
+  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = mean_hdi, alpha = 0.9, fill = "grey90") +
   geom_point(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
   geom_point(data = data %>% filter(which_behaviour == "Disp") %>% group_by(Density) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), cex = 3) +
-  scale_x_continuous("") +
-  scale_y_continuous("Dispersal rate")
+  scale_x_continuous("", sec.axis = sec_axis(name = expression(paste("Density (snails.", m^-2, " of release patch)")), trans = ~ . / (0.12 * 0.12))) +
+  scale_y_continuous("Emigration rate")
 
 p2 <- newdata %>%
   filter(which_behaviour == "Active") %>%
   ggplot() +
-  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = mean_hdi, fill = "grey90", alpha = 0.9) +
+  stat_lineribbon(aes(x = Density, y = .value), .width = 0.95, point_interval = mean_hdi, alpha = 0.9, fill = "grey90") +
   geom_point(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density, BOX) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), col = "grey60") +
   geom_point(data = data %>% filter(which_behaviour == "Active") %>% group_by(Density) %>% summarise(behave = mean(behave)), aes(x = Density, y = behave), cex = 3) +
-  scale_x_continuous("Density (snails per box)") +
+  scale_x_continuous("Density (snails per box)", sec.axis = sec_axis(~ . / (0.12 * 0.12))) +
   scale_y_continuous("Probability of activity")
 
 (p1 / p2) + plot_annotation(tag_levels = "A") & theme_bw() &
-  theme(legend.position = "none", panel.border = element_blank(), axis.line = element_line(colour = "black"))
+  theme(legend.position = "none")
 ```
 
 ### Figure 3
@@ -292,47 +317,94 @@ newdata <- as_tibble(ranef(mod, summary = FALSE)$ID[, , "behave_Intercept"]) %>%
   select(post_act_ifdisp, post_act_ifres, post_disp_ifact, post_disp_ifstill)
 
 p3 <- newdata %>%
+  invlogit() %>%
   select(post_act_ifdisp, post_act_ifres) %>%
+  mutate(Difference = post_act_ifdisp - post_act_ifres + mean(post_act_ifres)) %>%
   pivot_longer(everything(), names_to = "Disp") %>%
   mutate(Disp = fct_recode(Disp, `0` = "post_act_ifres", `1` = "post_act_ifdisp")) %>%
   ggplot() +
   geom_col(data = behave_wide %>%
     group_by(Disp) %>%
     summarise(Active = mean(Active == 1)), aes(x = factor(Disp), y = Active), col = "black", fill = "white") +
-  stat_eye(aes(x = Disp, y = invlogit(value)),
-    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi, alpha = 0.9
+  geom_hline(yintercept = mean(invlogit(newdata$post_act_ifres)), lty = 2, col = "darkgrey") +
+  stat_eye(aes(x = Disp, y = value, alpha = Disp),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi,
   ) +
-  scale_x_discrete("Dispersal status", labels = c("Resident", "Disperser")) +
-  scale_y_continuous("Activity probability", limits = c(0, 1))
+  stat_pointinterval(aes(x = Disp, y = value),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi,
+  ) +
+  scale_alpha_manual(values = c(0, 0.9, 0.9)) +
+  scale_x_discrete("Dispersal status",
+    labels = c(
+      paste("Resident (n=", sum(behave_wide$Disp == 0), ")", sep = ""),
+      paste("Disperser (n=", sum(behave_wide$Disp == 1), ")", sep = ""),
+      "Disp. - Res. difference"
+    )
+  ) +
+  scale_y_continuous("Activity probability", breaks = seq(0, 1, 0.2), limits = c(0, 1.08))
 
 p4 <- newdata %>%
+  invlogit() %>%
   select(post_disp_ifact, post_disp_ifstill) %>%
+  mutate(Difference = post_disp_ifact - post_disp_ifstill + mean(post_disp_ifstill)) %>%
   pivot_longer(everything(), names_to = "Active") %>%
   mutate(Active = fct_recode(Active, `0` = "post_disp_ifstill", `1` = "post_disp_ifact")) %>%
   ggplot() +
   geom_col(data = behave_wide %>%
     group_by(Active) %>%
     summarise(Disp = mean(Disp)), aes(x = factor(Active), y = Disp), col = "black", fill = "white") +
-  stat_eye(aes(x = Active, y = invlogit(value)),
-    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi, alpha = 0.9
+  geom_hline(yintercept = mean(invlogit(newdata$post_disp_ifstill)), lty = 2, col = "darkgrey") +
+  stat_eye(aes(x = Active, y = value, alpha = Active),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi
   ) +
-  scale_x_discrete("Active post dispersal?", labels = c("no", "yes")) +
-  scale_y_continuous("Dispersal rate", limits = c(0, 1))
+  stat_pointinterval(aes(x = Active, y = value),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi,
+  ) +
+  scale_alpha_manual(values = c(0, 0.9, 0.9)) +
+  scale_x_discrete("Active post dispersal?",
+    labels = c(
+      paste("no (n=", sum(behave_wide$Active == 0), ")", sep = ""),
+      paste("yes (n=", sum(behave_wide$Active == 1), ")", sep = ""),
+      "yes - no difference"
+    )
+  ) +
+  scale_y_continuous("Dispersal rate", breaks = seq(0, 1, 0.2), limits = c(0, 1.08))
 
 p3 + p4 &
   theme_bw() &
-  theme(legend.position = "none", panel.border = element_blank(), axis.line = element_line(colour = "black"))
+  theme(
+    legend.position = "none", panel.border = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    axis.line = element_line(colour = "black")
+  )
 ### it looks like there is a link
 
 ### let's confirm it!
 (newdata$post_disp_ifact - newdata$post_disp_ifstill) %>% mean_hdi()
 (newdata$post_act_ifdisp - newdata$post_act_ifres) %>% mean_hdi()
+
+(invlogit(newdata$post_disp_ifact) - invlogit(newdata$post_disp_ifstill)) %>% mean_hdi()
+(invlogit(newdata$post_act_ifdisp) - invlogit(newdata$post_act_ifres)) %>% mean_hdi()
+
+## W the multiplicative comparison, for the text of the results
+(invlogit(newdata$post_disp_ifact) / invlogit(newdata$post_disp_ifstill)) %>% mean_hdi()
+(invlogit(newdata$post_act_ifdisp) / invlogit(newdata$post_act_ifres)) %>% mean_hdi()
 ```
 
 ### Figure 4
 
 For the last figure, we want to show the expected relative shell mass for individual behaving differently (Disperser-Active, Disperser-Inactive, Resident-Active and Resident-Inactive). To do that, we need the random effect of individual ID for shell_mass:
 ```{r fig4}
+
+levels <- c("post_disp_act", "post_res_act", "post_disp_still", "post_res_still")
+names(levels) <- c(
+  paste("Disperser and Active (n=", sum(behave_wide$Disp == 1 & behave_wide$Active == 1), ")", sep = ""),
+  paste("Resident and Active (n=", sum(behave_wide$Disp == 0 & behave_wide$Active == 1), ")", sep = ""),
+  paste("Disperser and Inactive (n=", sum(behave_wide$Disp == 1 & behave_wide$Active == 0), ")", sep = ""),
+  paste("Resident and Inactive (n=", sum(behave_wide$Disp == 0 & behave_wide$Active == 0), ")", sep = "")
+)
+
+
 as_tibble(ranef(mod, summary = FALSE)$ID[, , "scalelogshellmass_Intercept"]) %>%
   mutate(
     post_disp_act = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1 & behave_wide$Active == 1))) %>% rowMeans(na.rm = TRUE),
@@ -342,12 +414,7 @@ as_tibble(ranef(mod, summary = FALSE)$ID[, , "scalelogshellmass_Intercept"]) %>%
   ) %>%
   select(post_disp_act, post_disp_still, post_res_act, post_res_still) %>%
   pivot_longer(everything()) %>%
-  mutate(name = fct_recode(name,
-    `Disperser and Active` = "post_disp_act",
-    `Resident and Active` = "post_res_act",
-    `Disperser and Inactive` = "post_disp_still",
-    `Resident and Inactive` = "post_res_still"
-  )) %>%
+  mutate(name = fct_recode(name, !!!levels)) %>%
   ggplot() +
   geom_hline(yintercept = 1, lty = 2) +
   stat_eye(aes(x = name, y = exp(value * attr(data$scale_logshellmass, "scaled:scale"))),
@@ -368,16 +435,24 @@ The first two are used to check there is no strong evidence of biased sex-ratio 
 ```{r supplementary-model1a}
 
 #### models for supplementary
+if (file.exists(here("R_output", "model_S1a.Rdata")))
+# this if-else statement is avoid re-fitting a model when knitting Rmd file if there is already one existing in R_output
+# to override, re-run the model and re-save manually by selecting relevant code lines then knit (or delete the Rdata object)
+  {
+    load(here("R_output", "model_S1a.Rdata"))
+  } else {
+  mod_S1a <- data %>%
+    filter(measurement_order == 1) %>% ## filter to avoid duplicates
+    group_by(BOX) %>%
+    summarise(Density = mean(Density), Nfemales = sum(Sex_dissection == "F")) %>%
+    ungroup() %>%
+    brm(Nfemales | trials(Density) ~ 1,
+      family = binomial,
+      prior = c(set_prior("normal(0,1.5)", class = "Intercept")), data = ., seed = 42
+    )
 
-mod_S1a <- data %>%
-  filter(measurement_order == 1) %>% ## filter to avoid duplicates
-  group_by(BOX) %>%
-  summarise(Density = mean(Density), Nfemales = sum(Sex_dissection == "F")) %>%
-  ungroup() %>%
-  brm(Nfemales | trials(Density) ~ 1,
-    family = binomial,
-    prior = c(set_prior("normal(0,1.5)", class = "Intercept")), data = ., seed = 42
-  )
+  save(list = "mod_S1a", file = here("R_output", "model_S1a.Rdata"))
+}
 
 mod_S1a %>%
   posterior_samples() %>%
@@ -389,15 +464,24 @@ mod_S1a %>%
 ```
 
 ```{r supplementary-model1b}
-mod_S1b <- data %>%
-  filter(measurement_order == 1) %>%
-  group_by(BOX) %>%
-  summarise(Density = mean(Density), Nfemales = sum(Sex_dissection == "F")) %>%
-  ungroup() %>%
-  brm(Nfemales | trials(Density) ~ 0 + factor(Density),
-    family = binomial,
-    prior = c(set_prior("normal(0,1.5)", class = "b")), data = ., seed = 42
-  )
+if (file.exists(here("R_output", "model_S1b.Rdata")))
+# this if-else statement is avoid re-fitting a model when knitting Rmd file if there is already one existing in R_output
+# to override, re-run the model and re-save manually by selecting relevant code lines then knit (or delete the Rdata object)
+  {
+    load(here("R_output", "model_S1b.Rdata"))
+  } else {
+  mod_S1b <- data %>%
+    filter(measurement_order == 1) %>%
+    group_by(BOX) %>%
+    summarise(Density = mean(Density), Nfemales = sum(Sex_dissection == "F")) %>%
+    ungroup() %>%
+    brm(Nfemales | trials(Density) ~ 0 + factor(Density),
+      family = binomial,
+      prior = c(set_prior("normal(0,1.5)", class = "b")), data = ., seed = 42
+    )
+
+  save(list = "mod_S1b", file = here("R_output", "model_S1b.Rdata"))
+}
 
 mod_S1b %>%
   posterior_samples() %>%
@@ -410,16 +494,24 @@ mod_S1b %>%
 
 ... and the third one is used to confirm our result that dispersal and activity are linked, with a more "classical" approach than the one we used in the main model:
 ```{r supplementary-model3}
-mod_S3 <- data %>%
-  filter(which_behaviour == "Active") %>%
-  brm(behave ~ scale_Density + scale_logheight + is.female + Disp2 + (1 | BOX),
-    family = bernoulli,
-    prior = c(
-      set_prior("normal(0,1.5)", class = "Intercept"),
-      set_prior("normal(0,1)", class = "b"),
-      set_prior("normal(0,1)", class = "sd")
-    ), data = ., seed = 42
-  )
+if (file.exists(here("R_output", "model_S3.Rdata")))
+# this if-else statement is avoid re-fitting a model when knitting Rmd file if there is already one existing in R_output
+# to override, re-run the model and re-save manually by selecting relevant code lines then knit (or delete the Rdata object)
+  {
+    load(here("R_output", "model_S3.Rdata"))
+  } else {
+  mod_S3 <- data %>%
+    filter(which_behaviour == "Active") %>%
+    brm(behave ~ scale_Density + scale_logheight + is.female + Disp2 + (1 | Date) + (1 | BOX),
+      family = bernoulli,
+      prior = c(
+        set_prior("normal(0,1.5)", class = "Intercept"),
+        set_prior("normal(0,1)", class = "b"),
+        set_prior("normal(0,1)", class = "sd")
+      ), data = ., seed = 42, control = list(adapt_delta = 0.95), iter = 6000, warmup = 3000, chains = 4
+    )
+  save(list = "mod_S3", file = here("R_output", "model_S3.Rdata"))
+}
 
 mod_S3 %>%
   posterior_samples() %>%
@@ -427,4 +519,125 @@ mod_S3 %>%
   pivot_longer(everything()) %>%
   group_by(name) %>%
   mean_hdi()
+```
+
+
+```{r}
+if (file.exists(here("R_output", "model_S3bis.Rdata")))
+# this if-else statement is avoid re-fitting a model when knitting Rmd file if there is already one existing in R_output
+# to override, re-run the model and re-save manually by selecting relevant code lines then knit (or delete the Rdata object)
+  {
+    load(here("R_output", "model_S3bis.Rdata"))
+  } else {
+  mod_S3bis <- data %>%
+    group_by(uniqueID) %>%
+    mutate(Active2 = -0.5 + as.numeric(mean(behave == 1 & which_behaviour == "Active") > 0)) %>%
+    filter(which_behaviour == "Disp") %>%
+    brm(behave ~ scale_Density + scale_logheight + is.female + Active2 + (1 | Date) + (1 | BOX),
+      family = bernoulli,
+      prior = c(
+        set_prior("normal(0,1.5)", class = "Intercept"),
+        set_prior("normal(0,1)", class = "b"),
+        set_prior("normal(0,1)", class = "sd")
+      ), data = ., seed = 42, control = list(adapt_delta = 0.95), iter = 6000, warmup = 3000, chains = 4
+    )
+  save(list = "mod_S3bis", file = here("R_output", "model_S3bis.Rdata"))
+}
+mod_S3bis %>%
+  posterior_samples() %>%
+  select(starts_with(c("Intercept", "b_", "sd_"))) %>%
+  pivot_longer(everything()) %>%
+  group_by(name) %>%
+  mean_hdi()
+```
+
+```{r figS5}
+# FIG S5 to do :)
+
+newdata <- as_tibble(ranef(mod, summary = FALSE)$ID[, , "behave_Intercept"]) %>%
+  mutate(
+    post_act_ifdisp = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1))) %>% rowMeans(),
+    post_act_ifres = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 0))) %>% rowMeans(),
+    post_disp_ifact = select(., all_of(subset(behave_wide$ID, behave_wide$Active == 1))) %>% rowMeans(),
+    post_disp_ifstill = select(., all_of(subset(behave_wide$ID, behave_wide$Active == 0))) %>% rowMeans(),
+  ) %>%
+  select(post_act_ifdisp, post_act_ifres, post_disp_ifact, post_disp_ifstill)
+
+pS5a <- newdata %>%
+  select(post_act_ifdisp, post_act_ifres) %>%
+  pivot_longer(everything(), names_to = "Disp") %>%
+  mutate(Disp = fct_recode(Disp, `0` = "post_act_ifres", `1` = "post_act_ifdisp")) %>%
+  mutate(Disp = fct_relevel(Disp, "1", after = Inf)) %>%
+  ggplot() +
+  stat_eye(aes(x = Disp, y = value),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi, alpha = 0.9
+  ) +
+  scale_x_discrete("Dispersal status",
+    labels = c(
+      paste("Resident (n=", sum(behave_wide$Disp == 0), ")", sep = ""),
+      paste("Disperser (n=", sum(behave_wide$Disp == 1), ")", sep = "")
+    )
+  ) +
+  scale_y_continuous("average individual-level BLUP (posterior)", limits = c(-1.5, 1.5))
+
+pS5b <- newdata %>%
+  select(post_disp_ifact, post_disp_ifstill) %>%
+  pivot_longer(everything(), names_to = "Active") %>%
+  mutate(Active = fct_recode(Active, `0` = "post_disp_ifstill", `1` = "post_disp_ifact")) %>%
+  mutate(Active = fct_relevel(Active, "1", after = Inf)) %>%
+  ggplot() +
+  stat_eye(aes(x = Active, y = value, alpha = Active),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi, alpha = 0.9
+  ) +
+  scale_x_discrete("Active post dispersal?",
+    labels = c(
+      paste("no (n=", sum(behave_wide$Active == 0), ")", sep = ""),
+      paste("yes (n=", sum(behave_wide$Active == 1), ")", sep = "")
+    )
+  ) +
+  scale_y_continuous("", limits = c(-1.5, 1.5))
+
+pS5a + pS5b &
+  theme_bw() &
+  theme(
+    legend.position = "none", panel.border = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    axis.line = element_line(colour = "black")
+  )
+### it looks like there is a link
+```
+
+```{r figS6}
+
+levels <- c("post_disp_act", "post_res_act", "post_disp_still", "post_res_still")
+names(levels) <- c(
+  "Disperser and Active",
+  "Resident and Active",
+  "Disperser and Inactive",
+  "Resident and Inactive"
+)
+
+
+as_tibble(ranef(mod, summary = FALSE)$ID[, , "scalelogshellmass_Intercept"]) %>%
+  mutate(
+    post_disp_act = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1 & behave_wide$Active == 1))) %>% rowMeans(na.rm = TRUE),
+    post_res_act = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 0 & behave_wide$Active == 1))) %>% rowMeans(na.rm = TRUE),
+    post_disp_still = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 1 & behave_wide$Active == 0))) %>% rowMeans(na.rm = TRUE),
+    post_res_still = select(., all_of(subset(behave_wide$ID, behave_wide$Disp == 0 & behave_wide$Active == 0))) %>% rowMeans(na.rm = TRUE),
+  ) %>%
+  select(post_disp_act, post_disp_still, post_res_act, post_res_still) %>%
+  mutate(.iteration = 1:dim(.)[1]) %>%
+  pivot_longer(matches("post")) %>%
+  mutate(name = fct_recode(name, !!!levels)) %>%
+  mutate(value = exp(value * attr(data$scale_logshellmass, "scaled:scale"))) %>% ## we unstandardize and then we "un-log"
+  compare_levels(variable = value, by = name) %>%
+  ggplot() +
+  geom_vline(xintercept = 0, lty = 2) +
+  stat_halfeye(aes(value, name),
+    .width = 0.95, interval_size = 1, point_size = 3, point_interval = mean_hdi, alpha = 0.9
+  ) +
+  scale_y_discrete("") +
+  scale_x_continuous("Posterior mean difference in relative shell mass") +
+  theme_bw() +
+  theme(legend.position = "none", panel.border = element_blank(), axis.line = element_line(colour = "black"))
 ```
