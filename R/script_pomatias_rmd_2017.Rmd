@@ -358,8 +358,6 @@ newdata <- as_tibble(ranef(mod, summary = FALSE)$ID[, , "behave_Intercept"]) %>%
 p3a <- newdata %>%
   invlogit() %>% # back transform from logit scale back to proportions
   select(post_act_ifdisp, post_act_ifres) %>% # this is the activity = f(dispersal) subplot; we select the columns accordingly
-  mutate(Difference = post_act_ifdisp - post_act_ifres + mean(post_act_ifres)) %>%
-  # we compute the posterior difference (we add the mean of the low category, just to align things when plotting)
   pivot_longer(everything(), names_to = "Disp") %>%
   mutate(Disp = fct_recode(Disp, `0` = "post_act_ifres", `1` = "post_act_ifdisp")) %>%
   ggplot() +
@@ -370,21 +368,14 @@ p3a <- newdata %>%
     aes(x = factor(Disp), y = Active),
     col = "black", fill = "white"
   ) +
-  geom_hline(yintercept = mean(invlogit(newdata$post_act_ifres)), lty = 2, col = "darkgrey") + ## the reference line for the difference
-  stat_eye(aes(x = Disp, y = value, alpha = Disp),
-    .width = 0.95, interval_size = 1,
+  stat_eye(aes(x = Disp, y = value),
+    .width = 0.95, interval_size = 1, slab_alpha=0.9,
     point_size = 3, point_interval = mean_hdi
   ) +
-  stat_pointinterval(aes(x = Disp, y = value),
-    .width = 0.95, interval_size = 1,
-    point_size = 3, point_interval = mean_hdi
-  ) +
-  scale_alpha_manual(values = c(0, 0.9, 0.9)) +
   scale_x_discrete("Dispersal status",
     labels = c(
       paste("Resident (n=", sum(behave_wide$Disp == 0), ")", sep = ""),
-      paste("Disperser (n=", sum(behave_wide$Disp == 1), ")", sep = ""),
-      "Disp. - Res. difference"
+      paste("Disperser (n=", sum(behave_wide$Disp == 1), ")", sep = "")
     )
   ) +
   scale_y_continuous("Activity probability", breaks = seq(0, 1, 0.2), limits = c(0, 1.08))
@@ -392,7 +383,6 @@ p3a <- newdata %>%
 p3b <- newdata %>%
   invlogit() %>%
   select(post_disp_ifact, post_disp_ifstill) %>%
-  mutate(Difference = post_disp_ifact - post_disp_ifstill + mean(post_disp_ifstill)) %>%
   pivot_longer(everything(), names_to = "Active") %>%
   mutate(Active = fct_recode(Active, `0` = "post_disp_ifstill", `1` = "post_disp_ifact")) %>%
   ggplot() +
@@ -403,21 +393,14 @@ p3b <- newdata %>%
     aes(x = factor(Active), y = Disp),
     col = "black", fill = "white"
   ) +
-  geom_hline(yintercept = mean(invlogit(newdata$post_disp_ifstill)), lty = 2, col = "darkgrey") +
-  stat_eye(aes(x = Active, y = value, alpha = Active),
-    .width = 0.95, interval_size = 1,
+  stat_eye(aes(x = Active, y = value),
+    .width = 0.95, interval_size = 1, slab_alpha=0.9,
     point_size = 3, point_interval = mean_hdi
   ) +
-  stat_pointinterval(aes(x = Active, y = value),
-    .width = 0.95, interval_size = 1,
-    point_size = 3, point_interval = mean_hdi
-  ) +
-  scale_alpha_manual(values = c(0, 0.9, 0.9)) +
   scale_x_discrete("Active post dispersal?",
     labels = c(
       paste("no (n=", sum(behave_wide$Active == 0), ")", sep = ""),
-      paste("yes (n=", sum(behave_wide$Active == 1), ")", sep = ""),
-      "yes - no difference"
+      paste("yes (n=", sum(behave_wide$Active == 1), ")", sep = "")
     )
   ) +
   scale_y_continuous("Dispersal rate", breaks = seq(0, 1, 0.2), limits = c(0, 1.08))
